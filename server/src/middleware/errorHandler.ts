@@ -34,13 +34,15 @@ export function errorHandler(
 
   // Known application errors
   if (err instanceof AppError) {
-    res.status(err.statusCode).json({
-      error: {
-        code: err.code,
-        message: err.message,
-        details: err.details,
-      },
-    });
+    const errorBody: Record<string, unknown> = {
+      code: err.code,
+      message: err.message,
+      details: err.details,
+    };
+    if ('alternatives' in err) {
+      errorBody.alternatives = (err as unknown as { alternatives: unknown[] }).alternatives;
+    }
+    res.status(err.statusCode).json({ error: errorBody });
     return;
   }
 

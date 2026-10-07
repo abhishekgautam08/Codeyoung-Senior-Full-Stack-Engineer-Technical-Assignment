@@ -101,10 +101,15 @@ export function utcToLocal(utcInstant: DateTime | Date, tz: string) {
       ? DateTime.fromJSDate(utcInstant, { zone: 'utc' }).setZone(tz)
       : utcInstant.setZone(tz);
 
+  let tzAbbr = dt.toFormat('ZZZZ');
+  if (tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta') {
+    tzAbbr = 'IST';
+  }
+
   return {
     localISO: dt.toISO()!,
     localFormatted: dt.toFormat('EEE, d MMM yyyy · h:mm a'),
-    tzAbbr: dt.toFormat('ZZZZ'),
+    tzAbbr,
     utcOffset: formatUtcOffset(dt.offset),
     localDate: dt.toFormat('yyyy-MM-dd'),
     localTime: dt.toFormat('HH:mm'),

@@ -523,3 +523,251 @@ describe('Concurrency race test', () => {
     }
   }, 30000);
 });
+
+describe('Backend Edge Cases (Assignment Specification)', () => {
+  it('counts a US evening slot falling on next IST calendar date against mentor IST date, not parent date', async () => {
+    // Parent in America/New_York (EDT, UTC-4).
+    // Parent evening: 2026-10-18 at 21:00 EDT = 2026-10-19 01:00:00 UTC = 2026-10-19 06:30:00 IST (+05:30)
+    // Parent local date: 2026-10-18. Mentor local date: 2026-10-19.
+    const eveningSlotUtc = '2026-10-19T01:00:00.000Z';
+
+    const res = await request.post('/api/bookings').send({
+      parentName: 'Evening Parent',
+      parentEmail: 'evening@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: eveningSlotUtc,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.booking.mentorLocalDate).toBe('2026-10-19');
+
+    // Verify MentorDailyLoad record is stored under mentor IST date '2026-10-19', NOT '2026-10-18'
+    const istLoad = await MentorDailyLoad.findOne({ mentorLocalDate: '2026-10-19' });
+    expect(istLoad).toBeDefined();
+    expect(istLoad!.count).toBe(1);
+
+    const parentDateLoad = await MentorDailyLoad.findOne({ mentorLocalDate: '2026-10-18' });
+    expect(parentDateLoad).toBeNull();
+  });
+
+  it('skips a mentor with 2 bookings on one IST date, but that mentor is still available the next IST date', async () => {
+    // Use Mentor A alone
+    const mentors = await Mentor.find({}).lean();
+    const mentorA = mentors[0];
+    // Deactivate all others so only mentor A is considered
+    await Mentor.updateMany({ _id: { $ne: mentorA._id } }, { $set: { isActive: false } });
+
+    const day1Slot1 = '2026-10-18T10:00:00.000Z'; // 15:30 IST on 2026-10-18
+    const day1Slot2 = '2026-10-18T10:30:00.000Z';
+    const day1Slot3 = '2026-10-18T11:00:00.000Z';
+    const day2Slot = '2026-10-19T10:00:00.000Z'; // 15:30 IST on 2026-10-19
+
+    // Book 2 slots on day 1
+    const res1 = await request.post('/api/bookings').send({
+      parentName: 'P1',
+      parentEmail: 'p1@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: day1Slot1,
+    });
+    expect(res1.status).toBe(201);
+
+    const res2 = await request.post('/api/bookings').send({
+      parentName: 'P2',
+      parentEmail: 'p2@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: day1Slot2,
+    });
+    expect(res2.status).toBe(201);
+
+    // 3rd booking on day 1 fails because mentor A has 2 bookings on that IST date
+    const res3 = await request.post('/api/bookings').send({
+      parentName: 'P3',
+      parentEmail: 'p3@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: day1Slot3,
+    });
+    expect(res3.status).toBe(409);
+    expect(res3.body.error.code).toBe('SLOT_UNAVAILABLE');
+
+    // Booking on day 2 SUCCEEDS with mentor A
+    const res4 = await request.post('/api/bookings').send({
+      parentName: 'P4',
+      parentEmail: 'p4@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: day2Slot,
+    });
+    expect(res4.status).toBe(201);
+    expect(res4.body.booking.mentor.name).toBe(mentorA.name);
+  });
+
+  it('returns 409 SLOT_UNAVAILABLE with a non-empty alternatives array sorted by closeness when all 10 mentors are booked', async () => {
+    // Clear and insert all 10 mentors
+    await Mentor.deleteMany({});
+    const tenMentors = Array.from({ length: 10 }, (_, i) => ({
+      name: `Mentor ${i + 1}`,
+      email: `mentor${i + 1}@codeyoung.in`,
+      timezone: 'Asia/Kolkata',
+      workingWindows: [{ startLocal: '00:00', endLocal: '23:59' }],
+      bio: `Mentor bio ${i + 1}`,
+      isActive: true,
+    }));
+    await Mentor.insertMany(tenMentors);
+
+    const targetSlot = '2026-10-18T14:00:00.000Z';
+
+    // Book all 10 mentors for targetSlot
+    for (let i = 0; i < 10; i++) {
+      const res = await request.post('/api/bookings').send({
+        parentName: `Parent ${i}`,
+        parentEmail: `parent${i}@example.com`,
+        parentTimezone: 'America/New_York',
+        slotStartUtc: targetSlot,
+      });
+      expect(res.status).toBe(201);
+    }
+
+    // 11th booking attempt for same slot
+    const fullRes = await request.post('/api/bookings').send({
+      parentName: 'Parent 11',
+      parentEmail: 'parent11@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: targetSlot,
+    });
+
+    expect(fullRes.status).toBe(409);
+    expect(fullRes.body.error.code).toBe('SLOT_UNAVAILABLE');
+
+    const alternatives = fullRes.body.error.alternatives || fullRes.body.error.details?.alternatives;
+    expect(Array.isArray(alternatives)).toBe(true);
+    expect(alternatives.length).toBeGreaterThan(0);
+
+    // Verify alternatives are sorted by closeness to targetSlot
+    const targetMs = new Date(targetSlot).getTime();
+    for (let i = 0; i < alternatives.length - 1; i++) {
+      const distA = Math.abs(new Date(alternatives[i].slotStartUtc).getTime() - targetMs);
+      const distB = Math.abs(new Date(alternatives[i + 1].slotStartUtc).getTime() - targetMs);
+      expect(distA).toBeLessThanOrEqual(distB);
+    }
+  });
+
+  it('prevents the same parent email from booking the same slot twice with DUPLICATE_BOOKING', async () => {
+    const slot = futureSlot(4, 15, 0);
+
+    const first = await request.post('/api/bookings').send({
+      parentName: 'Duplicate Test',
+      parentEmail: 'duplicate.parent@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: slot,
+    });
+    expect(first.status).toBe(201);
+
+    const second = await request.post('/api/bookings').send({
+      parentName: 'Duplicate Test',
+      parentEmail: 'DUPLICATE.PARENT@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: slot,
+    });
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('DUPLICATE_BOOKING');
+  });
+
+  it('frees both the slot and daily counter on cancel, and cancelling twice is safe (idempotent)', async () => {
+    const slot = futureSlot(4, 16, 0);
+
+    const bookRes = await request.post('/api/bookings').send({
+      parentName: 'Idemp Cancel',
+      parentEmail: 'cancel.idemp@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: slot,
+    });
+    expect(bookRes.status).toBe(201);
+    const bookingRef = bookRes.body.booking.bookingRef;
+    const mentorId = bookRes.body.booking.mentor.id;
+    const mentorLocalDate = bookRes.body.booking.mentorLocalDate;
+
+    const loadBefore = await MentorDailyLoad.findOne({ mentorId, mentorLocalDate });
+    expect(loadBefore!.count).toBe(1);
+
+    // First cancel
+    const cancel1 = await request.delete(`/api/bookings/${bookingRef}`);
+    expect(cancel1.status).toBe(200);
+    expect(cancel1.body.booking.status).toBe('CANCELLED');
+
+    const loadAfter1 = await MentorDailyLoad.findOne({ mentorId, mentorLocalDate });
+    expect(loadAfter1!.count).toBe(0);
+
+    // Second cancel (idempotent)
+    const cancel2 = await request.delete(`/api/bookings/${bookingRef}`);
+    expect(cancel2.status).toBe(200);
+    expect(cancel2.body.booking.status).toBe('CANCELLED');
+
+    const loadAfter2 = await MentorDailyLoad.findOne({ mentorId, mentorLocalDate });
+    expect(loadAfter2!.count).toBe(0); // Did not go negative
+  });
+
+  it('returns proper error codes: SLOT_IN_PAST for past slots, TOO_SOON for <2h lead time, VALIDATION_ERROR for invalid IANA timezone', async () => {
+    // 1. Past slot
+    const pastSlot = getClock().now().minus({ hours: 3 }).toUTC().toISO()!;
+    const pastRes = await request.post('/api/bookings').send({
+      parentName: 'Past Parent',
+      parentEmail: 'past@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: pastSlot,
+    });
+    expect(pastRes.status).toBe(400);
+    expect(pastRes.body.error.code).toBe('SLOT_IN_PAST');
+
+    // 2. Too soon (1 hour lead time < 2 hours)
+    const soonSlot = getClock().now().plus({ hours: 1 }).toUTC().toISO()!;
+    const soonRes = await request.post('/api/bookings').send({
+      parentName: 'Soon Parent',
+      parentEmail: 'soon@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: soonSlot,
+    });
+    expect(soonRes.status).toBe(400);
+    expect(soonRes.body.error.code).toBe('TOO_SOON');
+
+    // 3. Invalid IANA timezone
+    const validFutureSlot = futureSlot(3, 15, 0);
+    const tzRes = await request.post('/api/bookings').send({
+      parentName: 'Invalid TZ Parent',
+      parentEmail: 'badtz@test.com',
+      parentTimezone: 'Mars/Curiosity_Rover',
+      slotStartUtc: validFutureSlot,
+    });
+    expect(tzRes.status).toBe(400);
+    expect(tzRes.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('writes 2 notifications to outbox: parent gets local time with zone abbreviation, mentor gets IST time', async () => {
+    // Parent in America/New_York (EDT)
+    const slot = '2026-10-18T14:00:00.000Z'; // 10:00 AM EDT, 7:30 PM IST
+
+    const bookRes = await request.post('/api/bookings').send({
+      parentName: 'Notification Parent',
+      parentEmail: 'outbox.parent@test.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: slot,
+    });
+    expect(bookRes.status).toBe(201);
+    const bookingRef = bookRes.body.booking.bookingRef;
+
+    const outboxNotes = await Notification.find({
+      'payload.bookingRef': bookingRef,
+    }).lean();
+
+    expect(outboxNotes.length).toBe(2);
+
+    const parentNote = outboxNotes.find((n) => n.recipient === 'outbox.parent@test.com');
+    expect(parentNote).toBeDefined();
+    expect(parentNote!.type).toBe('BOOKING_CONFIRMED');
+    expect((parentNote!.payload as any).parentLocalTime).toMatch(/EDT/);
+
+    const mentorNote = outboxNotes.find((n) => n.recipient !== 'outbox.parent@test.com');
+    expect(mentorNote).toBeDefined();
+    expect(mentorNote!.type).toBe('NEW_BOOKING_MENTOR');
+    expect((mentorNote!.payload as any).mentorLocalTime).toMatch(/IST/);
+  });
+});
+

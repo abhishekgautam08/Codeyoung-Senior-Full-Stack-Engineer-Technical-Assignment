@@ -39,6 +39,8 @@ import {
   isSlotBookable,
   utcToLocal,
   createAssignmentStrategy,
+  generateSlotStartsUtc,
+  getTimeOfDay,
   type MentorCandidate,
 } from '../domain/index.js';
 import {
@@ -73,6 +75,7 @@ export interface BookingResult {
   slotEndUtc: string;
   parentLocalTime: string;
   mentorLocalTime: string;
+  mentorLocalDate: string;
   mentor: {
     id: string;
     name: string;
@@ -169,9 +172,10 @@ export class BookingService {
     );
 
     if (candidateMentors.length === 0) {
+      const alternatives = await this.findAlternatives(slotStartUtc, input.parentTimezone, activeMentors);
       throw new SlotUnavailableError(
         'That time was just booked by another family. Please pick an alternative.',
-        []
+        alternatives
       );
     }
 
@@ -313,17 +317,24 @@ export class BookingService {
     }
 
     // All candidates exhausted
+    const alternatives = await this.findAlternatives(slotStartUtc, input.parentTimezone, activeMentors);
     throw new SlotUnavailableError(
       'That time was just booked by another family. Please pick an alternative.',
-      []
+      alternatives
     );
   }
 
   async cancelBooking(bookingRef: string): Promise<BookingResult> {
-    const booking = await Booking.findOne({ bookingRef, status: 'CONFIRMED' }).lean();
+    const booking = await Booking.findOne({ bookingRef }).lean();
 
     if (!booking) {
       throw new NotFoundError('Booking');
+    }
+
+    if (booking.status === 'CANCELLED') {
+      // Idempotent cancel: already cancelled, return existing booking without double-decrementing
+      const populated = await Booking.findById(booking._id).populate('mentorId').lean();
+      return this.formatBookingResult(populated!);
     }
 
     // Set status to CANCELLED
@@ -348,6 +359,117 @@ export class BookingService {
     return this.formatBookingResult(updated!);
   }
 
+  private async findAlternatives(
+    requestedSlotUtc: DateTime,
+    parentTimezone: string,
+    activeMentors: Array<{
+      _id: unknown;
+      timezone: string;
+      workingWindows: Array<{ startLocal: string; endLocal: string }>;
+    }>
+  ): Promise<Array<{ slotStartUtc: string; slotEndUtc: string; localFormatted: string; timeOfDay: string }>> {
+    const now = this.clock.now();
+    const parentDate = requestedSlotUtc.setZone(parentTimezone).toFormat('yyyy-MM-dd');
+
+    const candidateStartsUtc = generateSlotStartsUtc(
+      parentDate,
+      parentTimezone,
+      config.slotIntervalMinutes
+    );
+
+    const nextDate = requestedSlotUtc.setZone(parentTimezone).plus({ days: 1 }).toFormat('yyyy-MM-dd');
+    candidateStartsUtc.push(...generateSlotStartsUtc(nextDate, parentTimezone, config.slotIntervalMinutes));
+
+    if (candidateStartsUtc.length === 0) return [];
+
+    const dayStart = candidateStartsUtc[0];
+    const dayEnd = candidateStartsUtc[candidateStartsUtc.length - 1].plus({ minutes: config.slotDurationMinutes });
+
+    const existingBookings = await Booking.find({
+      slotStartUtc: { $gte: dayStart.toJSDate(), $lt: dayEnd.toJSDate() },
+      status: 'CONFIRMED',
+    }).lean();
+
+    const bookedSet = new Set(
+      existingBookings.map((b) => `${b.mentorId.toString()}_${b.slotStartUtc.toISOString()}`)
+    );
+
+    const mentorLocalDates = new Set<string>();
+    for (const slotUtc of candidateStartsUtc) {
+      for (const mentor of activeMentors) {
+        mentorLocalDates.add(
+          `${mentor._id!.toString()}_${getMentorLocalDate(slotUtc.toJSDate(), mentor.timezone)}`
+        );
+      }
+    }
+
+    const dailyLoads = await MentorDailyLoad.find({
+      $or: Array.from(mentorLocalDates).map((key) => {
+        const [mentorId, mentorLocalDate] = key.split('_');
+        return { mentorId, mentorLocalDate };
+      }),
+    }).lean();
+
+    const dailyLoadMap = new Map(
+      dailyLoads.map((dl) => [`${dl.mentorId.toString()}_${dl.mentorLocalDate}`, dl.count])
+    );
+
+    const availableCandidates: Array<{
+      slotStartUtc: string;
+      slotEndUtc: string;
+      localFormatted: string;
+      timeOfDay: string;
+      diffMs: number;
+    }> = [];
+
+    const requestedMillis = requestedSlotUtc.toMillis();
+
+    for (const candUtc of candidateStartsUtc) {
+      if (candUtc.toMillis() === requestedMillis) continue;
+      if (!isSlotBookable(candUtc, config.minLeadTimeHours, now)) continue;
+
+      let hasMentor = false;
+      for (const mentor of activeMentors) {
+        if (!isMentorWorkingAtUtc(candUtc, mentor.timezone, mentor.workingWindows, config.slotDurationMinutes)) {
+          continue;
+        }
+        if (bookedSet.has(`${mentor._id!.toString()}_${candUtc.toJSDate().toISOString()}`)) {
+          continue;
+        }
+        const mDate = getMentorLocalDate(candUtc.toJSDate(), mentor.timezone);
+        const load = dailyLoadMap.get(`${mentor._id!.toString()}_${mDate}`) || 0;
+        if (load >= config.maxBookingsPerMentorPerDay) {
+          continue;
+        }
+        hasMentor = true;
+        break;
+      }
+
+      if (hasMentor) {
+        const localStart = utcToLocal(candUtc.toJSDate(), parentTimezone);
+        const startStr = candUtc.setZone(parentTimezone).toFormat('h:mm a');
+        const endStr = candUtc.plus({ minutes: config.slotDurationMinutes }).setZone(parentTimezone).toFormat('h:mm a');
+        availableCandidates.push({
+          slotStartUtc: candUtc.toISO()!,
+          slotEndUtc: candUtc.plus({ minutes: config.slotDurationMinutes }).toISO()!,
+          localFormatted: `${startStr} – ${endStr} ${localStart.tzAbbr}`,
+          timeOfDay: getTimeOfDay(candUtc, parentTimezone),
+          diffMs: Math.abs(candUtc.toMillis() - requestedMillis),
+        });
+      }
+    }
+
+    // Sort by closeness to requested slot time
+    availableCandidates.sort((a, b) => a.diffMs - b.diffMs);
+
+    return availableCandidates.slice(0, 5).map(({ slotStartUtc, slotEndUtc, localFormatted, timeOfDay }) => ({
+      slotStartUtc,
+      slotEndUtc,
+      localFormatted,
+      timeOfDay,
+    }));
+  }
+
   private formatBookingResult(booking: Record<string, unknown>): BookingResult {
     const mentor = booking.mentorId as Record<string, unknown>;
     const slotStartUtc = booking.slotStartUtc as Date;
@@ -368,6 +490,7 @@ export class BookingService {
       slotEndUtc: (booking.slotEndUtc as Date).toISOString(),
       parentLocalTime: `${parentLocal.localFormatted} ${parentLocal.tzAbbr} (${parentLocal.utcOffset})`,
       mentorLocalTime: `${mentorLocal.localFormatted} ${mentorLocal.tzAbbr} (${mentorLocal.utcOffset})`,
+      mentorLocalDate: booking.mentorLocalDate as string,
       mentor: {
         id: (mentor._id as { toString(): string }).toString(),
         name: mentor.name as string,
