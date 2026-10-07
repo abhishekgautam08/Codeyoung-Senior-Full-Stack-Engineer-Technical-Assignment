@@ -91,6 +91,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
       {/* Booking Form Card */}
       <form
+        noValidate
         onSubmit={handleSubmit}
         className="p-6 sm:p-8 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-6 shadow-xl"
       >
