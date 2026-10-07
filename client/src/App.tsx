@@ -22,6 +22,7 @@ import type {
   CreateBookingPayload,
   SuggestedTimezoneGroup,
   AlternativeSlot,
+  DayAvailability,
 } from './types/index.js';
 import { getUserTimezone } from './utils/date.js';
 import { DateTime } from 'luxon';
@@ -36,6 +37,7 @@ export function App() {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     return DateTime.now().setZone(getUserTimezone()).toFormat('yyyy-MM-dd');
   });
+  const [monthAvailability, setMonthAvailability] = useState<DayAvailability[]>([]);
 
   // Slot states
   const [slots, setSlots] = useState<SlotItem[]>([]);
@@ -74,6 +76,16 @@ export function App() {
       .catch((err) => console.error('Error fetching timezones:', err));
   }, []);
 
+  // Fetch month availability for the calendar/date strip
+  useEffect(() => {
+    if (!parentTimezone || !selectedDate) return;
+    const month = selectedDate.slice(0, 7);
+    api
+      .getMonthAvailability(month, parentTimezone)
+      .then((res) => setMonthAvailability(res.days))
+      .catch((err) => console.error('Failed to load month availability:', err));
+  }, [parentTimezone, selectedDate]);
+
   // Fetch slots whenever selectedDate or parentTimezone changes
   const fetchSlots = useCallback(async () => {
     if (!selectedDate || !parentTimezone) return;
@@ -84,24 +96,23 @@ export function App() {
       setSlots(res.slots);
 
       // If previously selected slot is no longer in this date/tz, clear it
-      if (selectedSlot) {
+      setSelectedSlot((prev) => {
+        if (!prev) return null;
         const stillValid = res.slots.find(
-          (s) => s.slotStartUtc === selectedSlot.slotStartUtc && s.isAvailable && s.isBookable
+          (s) => s.slotStartUtc === prev.slotStartUtc && s.isAvailable && s.isBookable
         );
-        if (!stillValid) {
-          setSelectedSlot(null);
-        }
-      }
+        return stillValid ? prev : null;
+      });
     } catch (err: any) {
       setSlotError(err.message || 'Failed to load trial class slots');
     } finally {
       setIsLoadingSlots(false);
     }
-  }, [selectedDate, parentTimezone, selectedSlot]);
+  }, [selectedDate, parentTimezone]);
 
   useEffect(() => {
     fetchSlots();
-  }, [selectedDate, parentTimezone]);
+  }, [fetchSlots]);
 
   // Handle slot selection
   const handleSelectSlot = (slot: SlotItem) => {
@@ -259,6 +270,7 @@ export function App() {
                       selectedDate={selectedDate}
                       onSelectDate={(date) => setSelectedDate(date)}
                       timezone={parentTimezone}
+                      availability={monthAvailability}
                     />
                   </div>
                 </div>

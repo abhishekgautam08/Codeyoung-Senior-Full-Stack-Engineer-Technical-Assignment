@@ -16,6 +16,7 @@ import { config } from '../config/index.js';
 import { Mentor, Booking, MentorDailyLoad } from '../models/index.js';
 
 import { getClock } from '../utils/clock.js';
+import { AvailabilityService } from '../services/AvailabilityService.js';
 
 export const slotsRouter = Router();
 
@@ -295,73 +296,9 @@ availabilityRouter.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { month, tz } = req.query as { month?: string; tz?: string };
-
-      if (!month || !tz) {
-        throw new ValidationError('month (YYYY-MM) and tz are required.');
-      }
-
-      if (!isValidIANAZone(tz)) {
-        throw new ValidationError(`"${tz}" is not a recognized timezone.`);
-      }
-
-      if (!/^\d{4}-\d{2}$/.test(month)) {
-        throw new ValidationError('month must be YYYY-MM format.');
-      }
-
-      const now = DateTime.utc();
-      const [year, monthNum] = month.split('-').map(Number);
-      const firstDay = DateTime.fromObject({ year, month: monthNum, day: 1 }, { zone: tz });
-      const daysInMonth = firstDay.daysInMonth!;
-
-      const days: Array<{
-        date: string;
-        available: boolean;
-        fullyBooked: boolean;
-      }> = [];
-
-      // Check each day in the month
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dateStr = firstDay.set({ day: d }).toFormat('yyyy-MM-dd');
-        const inWindow = isDateInBookableWindow(dateStr, tz, config.bookableWindowDays, now);
-
-        if (!inWindow) {
-          days.push({ date: dateStr, available: false, fullyBooked: false });
-          continue;
-        }
-
-        // Quick check: does this day have any available slots?
-        const mentors = await Mentor.find({ isActive: true }).lean();
-        const slotStartsUtc = generateSlotStartsUtc(dateStr, tz, config.slotIntervalMinutes);
-
-        let hasAvailableSlot = false;
-
-        for (const slotUtc of slotStartsUtc) {
-          if (!isSlotBookable(slotUtc, config.minLeadTimeHours, now)) continue;
-
-          for (const mentor of mentors) {
-            if (
-              isMentorWorkingAtUtc(
-                slotUtc,
-                mentor.timezone,
-                mentor.workingWindows,
-                config.slotDurationMinutes
-              )
-            ) {
-              hasAvailableSlot = true;
-              break;
-            }
-          }
-          if (hasAvailableSlot) break;
-        }
-
-        days.push({
-          date: dateStr,
-          available: hasAvailableSlot,
-          fullyBooked: !hasAvailableSlot,
-        });
-      }
-
-      res.json({ month, timezone: tz, days });
+      const service = new AvailabilityService();
+      const result = await service.getMonthAvailability(month as string, tz as string);
+      res.json(result);
     } catch (err) {
       next(err);
     }

@@ -103,4 +103,10 @@ export const api = {
     const res = await fetch(`${API_BASE}/health`);
     return handleResponse<{ status: string; timestamp: string }>(res);
   },
+
+  async getMonthAvailability(month: string, tz: string) {
+    const params = new URLSearchParams({ month, tz });
+    const res = await fetch(`${API_BASE}/availability/calendar?${params.toString()}`);
+    return handleResponse<{ month: string; timezone: string; days: Array<{ date: string; hasAvailability: boolean; limited: boolean }> }>(res);
+  },
 };

@@ -148,6 +148,37 @@ describe('GET /api/slots', () => {
   });
 });
 
+describe('GET /api/availability/calendar', () => {
+  it('returns month availability with date, hasAvailability, and limited flags', async () => {
+    const month = getClock().now().toFormat('yyyy-MM');
+    const res = await request
+      .get('/api/availability/calendar')
+      .query({ month, tz: 'America/New_York' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.month).toBe(month);
+    expect(res.body.timezone).toBe('America/New_York');
+    expect(res.body.days).toBeInstanceOf(Array);
+    expect(res.body.days.length).toBeGreaterThanOrEqual(28);
+
+    const firstDay = res.body.days[0];
+    expect(firstDay).toHaveProperty('date');
+    expect(firstDay).toHaveProperty('hasAvailability');
+    expect(firstDay).toHaveProperty('limited');
+    expect(typeof firstDay.hasAvailability).toBe('boolean');
+    expect(typeof firstDay.limited).toBe('boolean');
+  });
+
+  it('rejects invalid month format with 400', async () => {
+    const res = await request
+      .get('/api/availability/calendar')
+      .query({ month: 'invalid-month', tz: 'America/New_York' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
 describe('POST /api/bookings', () => {
   it('creates a booking successfully (happy path)', async () => {
     const slotStart = futureSlot();

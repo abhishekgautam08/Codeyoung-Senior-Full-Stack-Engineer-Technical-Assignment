@@ -100,3 +100,15 @@ export interface ApiErrorResponse {
     alternatives?: AlternativeSlot[];
   };
 }
+
+export interface DayAvailability {
+  date: string;
+  hasAvailability: boolean;
+  limited: boolean;
+}
+
+export interface MonthAvailabilityResult {
+  month: string;
+  timezone: string;
+  days: DayAvailability[];
+}
