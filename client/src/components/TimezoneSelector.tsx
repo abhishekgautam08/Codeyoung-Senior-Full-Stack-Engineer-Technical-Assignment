@@ -5,13 +5,13 @@ import type { SuggestedTimezoneGroup } from '../types/index.js';
 interface TimezoneSelectorProps {
   selectedTimezone: string;
   onSelectTimezone: (tz: string) => void;
-  timezoneGroups: SuggestedTimezoneGroup[];
+  timezoneGroups?: SuggestedTimezoneGroup[];
 }
 
 export const TimezoneSelector: React.FC<TimezoneSelectorProps> = ({
   selectedTimezone,
   onSelectTimezone,
-  timezoneGroups,
+  timezoneGroups = [],
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -49,7 +49,10 @@ export const TimezoneSelector: React.FC<TimezoneSelectorProps> = ({
     },
   ], []);
 
-  const groupsToUse = timezoneGroups.length > 0 ? timezoneGroups : defaultGroups;
+  const groupsToUse =
+    Array.isArray(timezoneGroups) && timezoneGroups.length > 0
+      ? timezoneGroups
+      : defaultGroups;
 
   // Flattened zones for search
   const filteredGroups = useMemo(() => {

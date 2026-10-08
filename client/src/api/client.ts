@@ -44,9 +44,16 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export const api = {
   async getSuggestedTimezones(): Promise<SuggestedTimezoneGroup[]> {
-    const res = await fetch(`${API_BASE}/timezones/suggested`);
-    const data = await handleResponse<{ suggestedTimezones: SuggestedTimezoneGroup[] }>(res);
-    return data.suggestedTimezones;
+    try {
+      const res = await fetch(`${API_BASE}/timezones/suggested`);
+      const data = await handleResponse<{
+        suggestedTimezones?: SuggestedTimezoneGroup[];
+        timezones?: any;
+      }>(res);
+      return Array.isArray(data.suggestedTimezones) ? data.suggestedTimezones : [];
+    } catch {
+      return [];
+    }
   },
 
   async getSlots(date: string, tz: string): Promise<SlotsResponse> {

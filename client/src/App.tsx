@@ -72,7 +72,11 @@ export function App() {
   useEffect(() => {
     api
       .getSuggestedTimezones()
-      .then((groups) => setTimezoneGroups(groups))
+      .then((groups) => {
+        if (Array.isArray(groups) && groups.length > 0) {
+          setTimezoneGroups(groups);
+        }
+      })
       .catch((err) => console.error('Error fetching timezones:', err));
   }, []);
 
