@@ -92,6 +92,7 @@ export interface BookingResult {
 }
 
 import { getClock, type Clock } from '../utils/clock.js';
+import { generateBookingRef } from '../utils/bookingRef.js';
 
 export class BookingService {
   private strategy = createAssignmentStrategy();
@@ -217,9 +218,14 @@ export class BookingService {
     );
 
     if (eligibleCandidates.length === 0) {
+      const alternatives = await this.findAlternatives(
+        slotStartUtc,
+        input.parentTimezone,
+        candidateMentors
+      );
       throw new SlotUnavailableError(
-        'All mentors have reached their daily booking limit. Please try another day.',
-        []
+        'All mentors have reached their daily booking limit. Please try another day or select an alternative.',
+        alternatives
       );
     }
 
@@ -277,7 +283,7 @@ export class BookingService {
       }
 
       // Step 2b: Insert the booking
-      const bookingRef = `CY-${nanoid(8).toUpperCase()}`;
+      const bookingRef = generateBookingRef();
       const meetingLink = `https://meet.codeyoung.demo/trial/${bookingRef}-${nanoid(6)}`;
 
       try {
@@ -379,16 +385,16 @@ export class BookingService {
     }>
   ): Promise<Array<{ slotStartUtc: string; slotEndUtc: string; localFormatted: string; timeOfDay: string }>> {
     const now = this.clock.now();
-    const parentDate = requestedSlotUtc.setZone(parentTimezone).toFormat('yyyy-MM-dd');
+    const candidateDays = [
+      requestedSlotUtc.setZone(parentTimezone).minus({ days: 1 }).toFormat('yyyy-MM-dd'),
+      requestedSlotUtc.setZone(parentTimezone).toFormat('yyyy-MM-dd'),
+      requestedSlotUtc.setZone(parentTimezone).plus({ days: 1 }).toFormat('yyyy-MM-dd'),
+    ].filter((day) => isDateInBookableWindow(day, parentTimezone, config.bookableWindowDays, now));
 
-    const candidateStartsUtc = generateSlotStartsUtc(
-      parentDate,
-      parentTimezone,
-      config.slotIntervalMinutes
-    );
-
-    const nextDate = requestedSlotUtc.setZone(parentTimezone).plus({ days: 1 }).toFormat('yyyy-MM-dd');
-    candidateStartsUtc.push(...generateSlotStartsUtc(nextDate, parentTimezone, config.slotIntervalMinutes));
+    const candidateStartsUtc: DateTime[] = [];
+    for (const day of candidateDays) {
+      candidateStartsUtc.push(...generateSlotStartsUtc(day, parentTimezone, config.slotIntervalMinutes));
+    }
 
     if (candidateStartsUtc.length === 0) return [];
 
@@ -437,6 +443,11 @@ export class BookingService {
     for (const candUtc of candidateStartsUtc) {
       if (candUtc.toMillis() === requestedMillis) continue;
       if (!isSlotBookable(candUtc, config.minLeadTimeHours, now)) continue;
+
+      const candParentDate = candUtc.setZone(parentTimezone).toFormat('yyyy-MM-dd');
+      if (!isDateInBookableWindow(candParentDate, parentTimezone, config.bookableWindowDays, now)) {
+        continue;
+      }
 
       let hasMentor = false;
       for (const mentor of activeMentors) {

@@ -314,6 +314,17 @@ The API is fully documented with OpenAPI 3.0 / Swagger UI at **`http://localhost
 6. **No Parent Authentication**: Parents book trials with their name and email without password registration. Removing authentication friction dramatically increases trial booking conversion rates.
 7. **Simulated Notification Outbox**: Notifications are written to a durable MongoDB `notifications` outbox collection. This decouples booking transactions from external SMTP email providers and makes message payloads directly inspectable during testing.
 
+### Mentor Shift Schedule & International Working Windows
+
+To provide comprehensive global coverage while enabling US parents to book trial sessions in the evening, the 10 mentors are distributed across three strategic shifts:
+
+| Shift Group | Mentors | IST Shift (UTC+5:30) | US Eastern (ET: EDT/EST) | US Pacific (PT: PDT/PST) | UK / Ireland (BST/GMT) | Coverage Window |
+|---|---|---|---|---|---|---|
+| **Shift 1 (Afternoon)** | 4 mentors (Aarav, Priya, Rohan, Ananya) | `15:00 – 00:00 IST` | `05:30 – 14:30 EDT`<br>`04:30 – 13:30 EST` | `02:30 – 11:30 PDT`<br>`01:30 – 10:30 PST` | `10:30 – 19:30 BST`<br>`09:30 – 18:30 GMT` | UK Daytime & Evening; US Morning & Early Afternoon |
+| **Shift 2 (Night)** | 3 mentors (Vikram, Neha, Arjun) | `20:00 – 05:00 IST` | `10:30 – 19:30 EDT`<br>`09:30 – 18:30 EST` | `07:30 – 16:30 PDT`<br>`06:30 – 15:30 PST` | `15:30 – 00:30 BST`<br>`14:30 – 23:30 GMT` | UK Late Evening; US Afternoon & Early Evening |
+| **Shift 3 (Late Night / US Evening)** | 3 mentors (Kavya, Siddharth, Divya) | `22:00 – 08:00 IST` | `12:30 – 22:30 EDT`<br>`11:30 – 21:30 EST` | `09:30 – 19:30 PDT`<br>`08:30 – 18:30 PST` | `17:30 – 03:30 BST`<br>`16:30 – 02:30 GMT` | **US Evening (up to 10:30 PM EDT / 9:30 PM EST)**; US PT Evening |
+| **Full Overlap Window** | **All 10 mentors active** | `22:00 – 00:00 IST` | `12:30 – 14:30 EDT`<br>`11:30 – 13:30 EST` | `09:30 – 11:30 PDT`<br>`08:30 – 10:30 PST` | `17:30 – 19:30 BST`<br>`16:30 – 18:30 GMT` | Peak Transatlantic Capacity (all 10 mentors available) |
+
 ---
 
 ## 🔍 Research Notes: Calendly & Cal.com Comparison

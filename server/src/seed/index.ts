@@ -15,9 +15,10 @@ import { config } from '../config/index.js';
 import { Mentor, Booking, MentorDailyLoad, Notification } from '../models/index.js';
 import { getMentorLocalDate } from '../domain/slots.js';
 import { logger } from '../utils/logger.js';
+import { generateBookingRef } from '../utils/bookingRef.js';
 
 export const MENTOR_SEED_DATA = [
-  // 6 mentors: 15:00–00:00 IST (covers US morning / UK evening)
+  // 4 mentors: 15:00–00:00 IST (covers US morning / UK daytime & evening)
   {
     name: 'Aarav Sharma',
     email: 'aarav.sharma@codeyoung.in',
@@ -42,43 +43,45 @@ export const MENTOR_SEED_DATA = [
     bio: 'Data science enthusiast who brings creativity to every coding lesson. Expert in Python and Scratch.',
     workingWindows: [{ startLocal: '15:00', endLocal: '00:00' }],
   },
+
+  // 3 mentors: 20:00–05:00 IST (covers US afternoon / early evening, UK late evening)
   {
     name: 'Vikram Reddy',
     email: 'vikram.reddy@codeyoung.in',
     bio: 'Former software engineer at a top startup. Specializes in web development and app design.',
-    workingWindows: [{ startLocal: '15:00', endLocal: '00:00' }],
+    workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
   },
   {
     name: 'Neha Krishnan',
     email: 'neha.krishnan@codeyoung.in',
     bio: 'Award-winning coding instructor with a talent for inspiring young minds to build amazing projects.',
-    workingWindows: [{ startLocal: '15:00', endLocal: '00:00' }],
+    workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
   },
-
-  // 4 mentors: 20:00–05:00 IST (covers US evening/night)
   {
     name: 'Arjun Nair',
     email: 'arjun.nair@codeyoung.in',
     bio: 'Night owl coder and mentor. Expert in JavaScript, robotics, and competitive programming.',
     workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
   },
+
+  // 3 mentors: 22:00–08:00 IST (covers US peak evening & night, e.g. 6:30 PM - 10:30 PM EDT)
   {
     name: 'Kavya Deshmukh',
     email: 'kavya.deshmukh@codeyoung.in',
     bio: 'Full-stack developer passionate about AI and machine learning. Makes learning fun and accessible.',
-    workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
+    workingWindows: [{ startLocal: '22:00', endLocal: '08:00' }],
   },
   {
     name: 'Siddharth Joshi',
     email: 'siddharth.joshi@codeyoung.in',
     bio: 'Mobile app developer who loves creating interactive learning experiences for young coders.',
-    workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
+    workingWindows: [{ startLocal: '22:00', endLocal: '08:00' }],
   },
   {
     name: 'Divya Menon',
     email: 'divya.menon@codeyoung.in',
     bio: 'Cybersecurity researcher and coding mentor. Teaches responsible coding practices from day one.',
-    workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
+    workingWindows: [{ startLocal: '22:00', endLocal: '08:00' }],
   },
 ];
 
@@ -160,7 +163,7 @@ async function seedDemoBookings(mentors: any[]) {
       const mentorLocalDate = getMentorLocalDate(slotStartUtc.toJSDate(), 'Asia/Kolkata');
       const parentTz = parentTimezones[bookingsCreated % parentTimezones.length];
       const parentName = parentNames[bookingsCreated];
-      const bookingRef = `CY-${nanoid(8).toUpperCase()}`;
+      const bookingRef = generateBookingRef();
 
       try {
         await Booking.create({

@@ -24,6 +24,7 @@ import { DateTime } from 'luxon';
 import { createApp } from '../app.js';
 import { Mentor, Booking, MentorDailyLoad, Notification } from '../models/index.js';
 import { FixedClock, setClock, resetClock, getClock } from '../utils/clock.js';
+import { generateBookingRef, BOOKING_REF_REGEX } from '../utils/bookingRef.js';
 
 let mongoServer: MongoMemoryServer;
 let app: ReturnType<typeof createApp>;
@@ -743,8 +744,8 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
   });
 
   it('writes 2 notifications to outbox: parent gets local time with zone abbreviation, mentor gets IST time', async () => {
-    // Parent in America/New_York (EDT)
-    const slot = '2026-10-18T14:00:00.000Z'; // 10:00 AM EDT, 7:30 PM IST
+    // Relative slot 3 days ahead at 14:00 UTC (9:00 AM EST or 10:00 AM EDT, 7:30 PM IST)
+    const slot = futureSlot(3, 14, 0);
 
     const bookRes = await request.post('/api/bookings').send({
       parentName: 'Notification Parent',
@@ -764,7 +765,7 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
     const parentNote = outboxNotes.find((n) => n.recipient === 'outbox.parent@test.com');
     expect(parentNote).toBeDefined();
     expect(parentNote!.type).toBe('BOOKING_CONFIRMED');
-    expect((parentNote!.payload as any).parentLocalTime).toMatch(/EDT/);
+    expect((parentNote!.payload as any).parentLocalTime).toMatch(/(EDT|EST)/);
 
     const mentorNote = outboxNotes.find((n) => n.recipient !== 'outbox.parent@test.com');
     expect(mentorNote).toBeDefined();
@@ -773,32 +774,44 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
   });
 
   it('ensures slots endpoint and booking endpoint agree when a slot is outside all mentor working windows (no availability and no booking)', async () => {
-    // Seed the real 10 mentors: 6 work 15:00-00:00 IST, 4 work 20:00-05:00 IST
+    // Seed the 10 mentors: 4 work 15:00-00:00 IST, 3 work 20:00-05:00 IST, 3 work 22:00-08:00 IST
     await Mentor.deleteMany({});
     const realMentors = [
-      ...Array.from({ length: 6 }, (_, i) => ({
+      ...Array.from({ length: 4 }, (_, i) => ({
         name: `Day Mentor ${i + 1}`,
         email: `day${i + 1}@codeyoung.in`,
         timezone: 'Asia/Kolkata',
         workingWindows: [{ startLocal: '15:00', endLocal: '00:00' }],
         isActive: true,
       })),
-      ...Array.from({ length: 4 }, (_, i) => ({
+      ...Array.from({ length: 3 }, (_, i) => ({
         name: `Night Mentor ${i + 1}`,
         email: `night${i + 1}@codeyoung.in`,
         timezone: 'Asia/Kolkata',
         workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
         isActive: true,
       })),
+      ...Array.from({ length: 3 }, (_, i) => ({
+        name: `Late Mentor ${i + 1}`,
+        email: `late${i + 1}@codeyoung.in`,
+        timezone: 'Asia/Kolkata',
+        workingWindows: [{ startLocal: '22:00', endLocal: '08:00' }],
+        isActive: true,
+      })),
     ];
     await Mentor.insertMany(realMentors);
 
-    // Slot at 09:00:00 UTC = 14:30 IST.
-    // 14:30 IST is outside 15:00-00:00 IST and outside 20:00-05:00 IST for ALL 10 mentors!
-    const targetSlotUtc = '2026-10-18T09:00:00.000Z';
+    // Dynamic slot inside the 14-day window: pick date 3 days ahead at 14:30 IST.
+    // 14:30 IST is outside 15:00-00:00, 20:00-05:00, and 22:00-08:00 for ALL 10 mentors!
+    const targetDate = getClock().now().plus({ days: 3 }).toFormat('yyyy-MM-dd');
+    const targetSlotUtc = DateTime.fromISO(targetDate, { zone: 'America/New_York' })
+      .setZone('Asia/Kolkata')
+      .set({ hour: 14, minute: 30, second: 0, millisecond: 0 })
+      .toUTC()
+      .toISO()!;
 
     // 1. GET /api/slots endpoint check: slot is NOT offered / not available
-    const slotsRes = await request.get('/api/slots?date=2026-10-18&tz=America/New_York');
+    const slotsRes = await request.get(`/api/slots?date=${targetDate}&tz=America/New_York`);
     expect(slotsRes.status).toBe(200);
     const slot = slotsRes.body.slots.find(
       (s: any) => new Date(s.startUtc).getTime() === new Date(targetSlotUtc).getTime()
@@ -817,11 +830,10 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
     expect(bookRes.body.error.message).toMatch(/No mentors are available at this time/i);
   });
 
-  it('rejects a slot beyond the 14-day bookable horizon in BOTH the slots endpoint and POST /api/bookings', async () => {
-    // Current pinned now is 2026-10-15
-    // 20 days ahead is 2026-11-04 (beyond the 14-day horizon)
-    const futureDate = '2026-11-04';
-    const futureSlotUtc = '2026-11-04T15:00:00.000Z';
+  it('rejects a slot beyond the 14-day bookable horizon in BOTH the slots endpoint and POST /api/bookings (relative to clock)', async () => {
+    // Dynamically calculate 24 days ahead (beyond the 14-day horizon) relative to current clock
+    const futureDate = getClock().now().plus({ days: 24 }).toFormat('yyyy-MM-dd');
+    const futureSlotUtc = getClock().now().plus({ days: 24 }).set({ hour: 15, minute: 0, second: 0, millisecond: 0 }).toUTC().toISO()!;
 
     // 1. GET /api/slots MUST reject with 400 VALIDATION_ERROR
     const slotsRes = await request.get(`/api/slots?date=${futureDate}&tz=America/New_York`);
@@ -839,6 +851,80 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
     expect(bookRes.status).toBe(400);
     expect(bookRes.body.error.code).toBe('VALIDATION_ERROR');
     expect(bookRes.body.error.message).toMatch(/within the next 14 days/i);
+  });
+
+  it('generates bookingRef in CY-XXXXXXXX format with uppercase letters and digits only, excluding I, O, 0, and 1', async () => {
+    // 1. Unit check: test 1,000 generated booking refs
+    for (let i = 0; i < 1000; i++) {
+      const ref = generateBookingRef();
+      expect(ref).toMatch(BOOKING_REF_REGEX);
+      expect(ref).not.toMatch(/[IO01]/);
+      expect(ref.length).toBe(11); // "CY-" (3) + 8 chars = 11
+    }
+
+    // 2. Integration check: verify booking endpoint returns conforming reference
+    const slot = futureSlot(3, 16, 0);
+    const bookRes = await request.post('/api/bookings').send({
+      parentName: 'Ref Format Parent',
+      parentEmail: 'ref.parent@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: slot,
+    });
+    expect(bookRes.status).toBe(201);
+    const ref = bookRes.body.booking.bookingRef;
+    expect(ref).toMatch(BOOKING_REF_REGEX);
+    expect(ref).not.toMatch(/[IO01]/);
+  });
+
+  it('ensures alternatives on a 409 never include slots beyond the 14-day horizon or inside the 2-hour lead time', async () => {
+    // Satiate all 10 mentors on day 13 (edge of 14-day horizon)
+    await Mentor.deleteMany({});
+    const tenMentors = Array.from({ length: 10 }, (_, i) => ({
+      name: `Mentor ${i + 1}`,
+      email: `mentor${i + 1}@codeyoung.in`,
+      timezone: 'Asia/Kolkata',
+      workingWindows: [{ startLocal: '00:00', endLocal: '23:59' }],
+      isActive: true,
+    }));
+    await Mentor.insertMany(tenMentors);
+
+    // Target slot on day 13 (near horizon boundary)
+    const boundarySlot = futureSlot(13, 16, 0);
+    for (let i = 0; i < 10; i++) {
+      await request.post('/api/bookings').send({
+        parentName: `Parent Edge ${i}`,
+        parentEmail: `parent.edge${i}@example.com`,
+        parentTimezone: 'America/New_York',
+        slotStartUtc: boundarySlot,
+      });
+    }
+
+    // 11th booking creates 409 conflict
+    const conflictRes = await request.post('/api/bookings').send({
+      parentName: 'Conflict Parent',
+      parentEmail: 'conflict@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: boundarySlot,
+    });
+
+    expect(conflictRes.status).toBe(409);
+    expect(conflictRes.body.error.code).toBe('SLOT_UNAVAILABLE');
+    const alternatives = conflictRes.body.error.alternatives;
+    expect(alternatives.length).toBeGreaterThan(0);
+
+    const now = getClock().now();
+    for (const alt of alternatives) {
+      const altUtc = DateTime.fromISO(alt.slotStartUtc);
+      // Constraint 1: Must be at least 2 hours from now
+      expect(altUtc.diff(now, 'hours').hours).toBeGreaterThanOrEqual(2);
+
+      // Constraint 2: Must be within 14-day bookable window
+      const parentDate = altUtc.setZone('America/New_York').toFormat('yyyy-MM-dd');
+      const nowDate = now.setZone('America/New_York').toFormat('yyyy-MM-dd');
+      const daysDiff = DateTime.fromISO(parentDate).diff(DateTime.fromISO(nowDate), 'days').days;
+      expect(daysDiff).toBeLessThanOrEqual(14);
+      expect(daysDiff).toBeGreaterThanOrEqual(0);
+    }
   });
 });
 

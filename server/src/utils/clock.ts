@@ -6,7 +6,9 @@ export interface Clock {
 
 export class SystemClock implements Clock {
   now(): DateTime {
-    return DateTime.utc();
+    const offsetDays = Number(process.env.FAKE_CLOCK_OFFSET_DAYS || 0);
+    const nowUtc = DateTime.utc();
+    return offsetDays !== 0 ? nowUtc.plus({ days: offsetDays }) : nowUtc;
   }
 }
 
