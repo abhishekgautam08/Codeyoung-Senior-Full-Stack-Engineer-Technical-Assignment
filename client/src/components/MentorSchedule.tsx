@@ -177,19 +177,19 @@ export const MentorSchedule: React.FC = () => {
                 <div className="text-sm font-bold text-white flex items-center gap-1.5">
                   <span
                     className={
-                      (schedule?.dailyLoad.count ?? 0) >= 2
+                      (schedule?.dailyLoad?.count ?? 0) >= (schedule?.dailyLoad?.max ?? 2)
                         ? 'text-rose-400'
                         : 'text-emerald-400'
                     }
                   >
-                    {schedule?.dailyLoad.count ?? 0} / {schedule?.dailyLoad.max ?? 2}
+                    {schedule?.dailyLoad?.count ?? 0} / {schedule?.dailyLoad?.max ?? 2}
                   </span>
                   <span className="text-xs text-slate-400 font-normal">trials booked</span>
                 </div>
               </div>
               <div
                 className={`w-3 h-3 rounded-full ${
-                  (schedule?.dailyLoad.count ?? 0) >= 2
+                  (schedule?.dailyLoad?.count ?? 0) >= (schedule?.dailyLoad?.max ?? 2)
                     ? 'bg-rose-500 ring-4 ring-rose-500/20'
                     : 'bg-emerald-500 ring-4 ring-emerald-500/20'
                 }`}

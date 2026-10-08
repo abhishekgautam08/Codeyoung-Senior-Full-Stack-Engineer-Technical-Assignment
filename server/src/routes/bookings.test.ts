@@ -128,6 +128,20 @@ describe('GET /api/mentors', () => {
     expect(res.body.mentors[0]).toHaveProperty('name');
     expect(res.body.mentors[0]).toHaveProperty('workingWindows');
   });
+
+  it('returns mentor schedule with dailyLoad, workingWindows, and bookings', async () => {
+    const mentor = await Mentor.findOne({ isActive: true });
+    expect(mentor).toBeDefined();
+
+    const res = await request.get(`/api/mentors/${mentor!._id}/schedule`);
+    expect(res.status).toBe(200);
+    expect(res.body.mentor).toBeDefined();
+    expect(res.body.dailyLoad).toBeDefined();
+    expect(typeof res.body.dailyLoad.count).toBe('number');
+    expect(res.body.dailyLoad.max).toBe(2);
+    expect(res.body.workingWindows).toBeInstanceOf(Array);
+    expect(res.body.bookings).toBeInstanceOf(Array);
+  });
 });
 
 describe('GET /api/slots', () => {
