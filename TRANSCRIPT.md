@@ -321,7 +321,7 @@ Final fixes, please run everything and show real output:
    - Added regression test verifying alternatives on day-13 boundary slots never exceed the 14-day horizon or violate minimum lead time.
 5. **Real MongoDB Smoke Test Execution**:
    - Tested and verified against a real MongoDB server instance over standard TCP on `mongodb://127.0.0.1:27017/codeyoung_trial` (matching `docker-compose.yml` port).
-   - Confirmed all 5 smoke checks pass against real MongoDB.
+   - Confirmed all 4 smoke checks pass against real MongoDB.
 6. **Final Verification Results**:
    - **Server Tests**: 100 passing
    - **Client Tests**: 6 passing
@@ -387,6 +387,6 @@ Then run lint, build, all tests, and the smoke test, update TRANSCRIPT.md, commi
 5. **Verification & Quality Gate Execution**:
    - **`npm run lint`**: 0 errors.
    - **`npm run build`**: Clean TypeScript compilation (`tsc`) on server and Vite bundle on client.
-   - **`npm test`**: **118 passed across 5 test files** (108 server + 10 client).
-   - **`npm run smoke`**: All 5 smoke checks passed end-to-end with real and fixed clock modes transparently printed.
+   - **`npm test`**: **120 passed across 5 test files** (110 server + 10 client).
+   - **`npm run smoke`**: All 4 smoke checks passed end-to-end with real and fixed clock modes transparently printed.
 

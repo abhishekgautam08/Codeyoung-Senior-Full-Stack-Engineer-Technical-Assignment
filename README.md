@@ -4,14 +4,17 @@ A production-grade, demo-ready trial-class booking platform engineered for **Cod
 
 The system handles multi-continent time zones, Daylight Saving Time (DST) boundaries, strict mentor daily load caps, and high-concurrency booking races without double-booking.
 
+> [!NOTE]
+> **Email delivery is simulated**: Outbound booking confirmations and mentor alerts are written directly to a durable MongoDB outbox collection (`notifications`). No real SMTP server or third-party email provider is contacted. Outbox payloads can be inspected directly in the database or server logs.
+
 ---
 
 ## 📸 Visual Demo & Screenshots
 
-<!-- Place animated demo GIF or UI screenshots here -->
+<!-- Screenshots are stored in docs/images/ -->
 | Booking Experience (3 Steps) | Calendar Availability & Conflict Handling |
 | :---: | :---: |
-| ![Trial Booking Flow Placeholder](https://via.placeholder.com/600x380/0f172a/6366f1?text=Trial+Booking+Experience) | ![Conflict Alternatives Modal](https://via.placeholder.com/600x380/0f172a/6366f1?text=409+Conflict+Alternatives+Modal) |
+| ![Trial Booking Flow](docs/images/booking-flow.png) | ![Conflict Alternatives Modal](docs/images/conflict-modal.png) |
 
 ---
 
@@ -89,19 +92,19 @@ codeyoung-trial-booking/
 │   │   ├── config/             # Environment & business rules config
 │   │   ├── domain/             # Pure domain logic (Clock, slots, DST, timezones, assignment)
 │   │   │   ├── slots.ts
-│   │   │   ├── slots.test.ts   # 58 domain unit tests (DST, midnight shifts, UTC, clock invariance)
+│   │   │   ├── slots.test.ts   # 65 domain unit tests (DST, midnight shifts, UTC, clock invariance)
 │   │   │   ├── assignment.ts
-│   │   │   └── assignment.test.ts
+│   │   │   └── assignment.test.ts # 8 assignment unit tests
 │   │   ├── models/             # Mongoose schemas & indexes
 │   │   ├── routes/             # Express endpoints & rate limiting
 │   │   │   ├── bookings.ts
-│   │   │   ├── bookings.test.ts # 28 integration tests (races, edge cases, outbox, DST)
+│   │   │   ├── bookings.test.ts # 35 integration tests (races, edge cases, outbox, DST)
 │   │   │   ├── slots.ts
 │   │   │   ├── mentors.ts
 │   │   │   └── timezones.ts
 │   │   ├── services/           # BookingService, AvailabilityService, NotificationService, Reconciliation
 │   │   │   ├── reconciliation.ts
-│   │   │   └── reconciliation.test.ts # Leak simulation & reconciliation tests
+│   │   │   └── reconciliation.test.ts # 2 leak simulation & reconciliation tests
 │   │   ├── utils/              # Injectable Clock, errors, logger
 │   │   ├── seed/               # 10 Indian mentors + demo bookings + reconcile CLI
 │   │   └── docs/               # Swagger / OpenAPI specification
@@ -121,7 +124,7 @@ codeyoung-trial-booking/
     │   │   ├── SystemStats.tsx # Invariants verification dashboard
     │   │   └── ConflictModal.tsx    # 409 slot alternative dialog
     │   ├── test/               # React Testing Library + Vitest client test suite
-    │   │   └── booking.test.tsx # 6 comprehensive component tests
+    │   │   └── booking.test.tsx # 10 comprehensive component tests
     │   ├── utils/              # Luxon date formatters & RFC 5545 .ics generator
     │   ├── types/              # TypeScript interface definitions
     │   └── index.css           # Modern design system & Tailwind styling
@@ -168,12 +171,22 @@ cp .env.example .env
 | `RATE_LIMIT_MAX_REQUESTS` | `100` | Max requests per IP per window |
 | `FAKE_CLOCK_OFFSET_DAYS` | `0` | Simulates forward time drift in days; active ONLY in `test` or `development`, ignored in `production` |
 
-### 5. Seed Database (Idempotent)
-Seeds the 10 Indian mentors with their respective working windows (`15:00–00:00 IST` and `20:00–05:00 IST`):
+### 5. Seed Database & Verification (Idempotent)
+Seeds the 10 Indian mentors distributed across three strategic shifts:
+- **Shift 1 (Afternoon)**: 4 mentors (`15:00–00:00 IST` / UK daytime & evening, US morning)
+- **Shift 2 (Night)**: 3 mentors (`20:00–05:00 IST` / UK late evening, US afternoon)
+- **Shift 3 (Late Night / US Evening)**: 3 mentors (`22:00–08:00 IST` / covers US evening up to 10:30 PM EDT / 9:30 PM EST)
+
 ```bash
+# Seed mentors with 3-shift working windows
 npm run seed
+
+# Seed mentors with ~20 sample confirmed demo bookings across the week
+npm run seed:demo
+
+# Run end-to-end smoke verification across time zones, capacity, and edge cases
+npm run smoke
 ```
-*(Optional: run `npm run seed:demo` to seed mentors along with ~20 sample confirmed bookings across the week).*
 
 ### 6. Run the Application
 Starts both the backend (`http://localhost:3001`) and frontend (`http://localhost:5173`) concurrently:
@@ -196,13 +209,13 @@ npm run reconcile -- 2026-10-18
 
 ### 8. Run Verification & Tests
 ```bash
-# Run full test suite (102 tests across server and client)
+# Run full test suite (120 tests across server and client)
 npm test
 
-# Run backend tests only (96 tests)
+# Run backend tests only (110 tests)
 npm run test:server
 
-# Run client tests only (6 tests)
+# Run client tests only (10 tests)
 npm run test:client
 
 # Run lint checks across all workspaces
@@ -233,6 +246,8 @@ The system supports all standard IANA time zones with curated presets for Codeyo
   At 2:00 AM local time, clocks jump to 3:00 AM. The 2:00 AM–2:59 AM hour does not exist. Slot generation operates on UTC instants derived from the parent day's boundaries. The nonexistent hour is never produced, preventing invalid slots.
 - **Fall-Back (25-Hour Day, e.g. US 2026-11-01)**:
   Clocks repeat 1:00 AM–1:59 AM. Two distinct UTC instants represent 1:30 AM (the first at UTC-4 EDT, the second at UTC-5 EST). The generator produces **both** slots and labels them distinctly (`1:30 AM EDT` vs `1:30 AM EST`), allowing parents to book either occurrence without ambiguity.
+  > [!NOTE]
+  > **Shift Coverage Caveat**: Disambiguation of the fall-back repeated hour (e.g. `1:30 AM EDT` vs `1:30 AM EST`) is verified in unit tests (`server/src/domain/slots.test.ts`) using synthetic mentor availability. With the seeded shifts (earliest shift starting at 15:00 IST / 05:30 EDT / 04:30 EST), no mentor works at 1:30 AM Eastern, so it is not bookable for New York parents with the live seeded roster.
 - **US vs. UK/Ireland Transition Differences**:
   The US transitions on the second Sunday of March and first Sunday of November. The UK/Europe transitions on the last Sunday of March and last Sunday of October. Between these dates, the time difference between London and New York shifts from 5 hours to 4 hours. Because slot intervals and working windows are converted via IANA zone definitions in Luxon, this multi-week transatlantic desynchronization is handled automatically without hardcoded offsets.
 
@@ -244,7 +259,7 @@ A US evening class (e.g., 9:00 PM EDT on October 18) corresponds to 6:30 AM IST 
 ## 🔒 Concurrency Design
 
 ### The Two-Phase Race Prevention Strategy (No Multi-Document Transactions)
-Standard MongoDB transactions require a replica set or MongoDB Atlas cluster. To provide enterprise-level concurrency safety on standalone MongoDB instances, this system uses a two-phase protocol:
+Standard MongoDB transactions require a replica set or MongoDB Atlas cluster. To provide robust concurrency safety without requiring a replica set or distributed locks on standalone MongoDB instances, this system uses a two-phase protocol:
 
 ```
 Step 1: Atomic Increment on MentorDailyLoad
@@ -310,9 +325,9 @@ The API is fully documented with OpenAPI 3.0 / Swagger UI at **`http://localhost
 1. **30-Minute Fixed Slots**: Trial classes are strictly 30 minutes in length, starting on 30-minute intervals. We chose fixed intervals over arbitrary durations to maximize slot alignment across mentors and time zones.
 2. **Mentor Day = Asia/Kolkata Calendar Day**: Capacity counting is strictly evaluated in `Asia/Kolkata` (00:00 to 23:59 IST). This respects mentors' natural biological workday regardless of where parents reside.
 3. **2-Hour Lead Time**: Parents cannot book slots starting within 2 hours of current time. This guarantees mentors have notice and preparation time.
-4. **14-Day Booking Horizon**: Parents can book up to 14 days in advance. Research shows trial attendance drops sharply when scheduled further than 2 weeks out.
+4. **14-Day Booking Horizon**: Parents can book up to 14 days in advance. We assume a 14-day booking horizon as a practical scheduling window to focus bookings on near-term commitments.
 5. **Least-Loaded Assignment**: Incoming trials are routed to the mentor with the fewest booked classes that day. This prevents burnout and balances work evenly.
-6. **No Parent Authentication**: Parents book trials with their name and email without password registration. Removing authentication friction dramatically increases trial booking conversion rates.
+6. **No Parent Authentication**: Parents book trials with their name and email without password registration. We assume this trial-first design to eliminate upfront signup friction for prospective families.
 7. **Simulated Notification Outbox**: Notifications are written to a durable MongoDB `notifications` outbox collection. This decouples booking transactions from external SMTP email providers and makes message payloads directly inspectable during testing.
 
 ### Mentor Shift Schedule & International Working Windows

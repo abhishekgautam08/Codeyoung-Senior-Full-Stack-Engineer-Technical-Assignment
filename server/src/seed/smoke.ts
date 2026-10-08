@@ -67,11 +67,12 @@ async function runSmokeTest() {
 
   const app = createApp();
   const server = http.createServer(app);
-  await new Promise<void>((resolve) => server.listen(3001, () => resolve()));
-  console.log('\n✓ Express server listening on http://localhost:3001');
+  await new Promise<void>((resolve) => server.listen(0, () => resolve()));
+  const port = (server.address() as any).port;
+  console.log(`\n✓ Express server listening on http://localhost:${port}`);
 
   async function callApi(method: string, path: string, body?: unknown) {
-    const res = await fetch(`http://localhost:3001${path}`, {
+    const res = await fetch(`http://localhost:${port}${path}`, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
