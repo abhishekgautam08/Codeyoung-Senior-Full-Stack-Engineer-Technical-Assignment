@@ -16,7 +16,7 @@ import { Mentor, Booking, MentorDailyLoad, Notification } from '../models/index.
 import { getMentorLocalDate } from '../domain/slots.js';
 import { logger } from '../utils/logger.js';
 
-const MENTOR_SEED_DATA = [
+export const MENTOR_SEED_DATA = [
   // 6 mentors: 15:00–00:00 IST (covers US morning / UK evening)
   {
     name: 'Aarav Sharma',
@@ -221,7 +221,10 @@ async function main() {
   logger.info('\n✅ Seed complete!');
 }
 
-main().catch((err) => {
-  logger.error(err, 'Seed failed');
-  process.exit(1);
-});
+const isMain = process.argv[1]?.replace(/\\/g, '/').endsWith('seed/index.ts') || process.argv[1]?.replace(/\\/g, '/').endsWith('seed/index.js');
+if (isMain) {
+  main().catch((err) => {
+    logger.error(err, 'Seed failed');
+    process.exit(1);
+  });
+}

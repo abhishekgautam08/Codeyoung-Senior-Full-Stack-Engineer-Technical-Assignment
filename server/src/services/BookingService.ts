@@ -37,6 +37,7 @@ import {
   isMentorWorkingAtUtc,
   getMentorLocalDate,
   isSlotBookable,
+  isDateInBookableWindow,
   utcToLocal,
   createAssignmentStrategy,
   generateSlotStartsUtc,
@@ -49,6 +50,7 @@ import {
   TooSoonError,
   DuplicateBookingError,
   NotFoundError,
+  ValidationError,
 } from '../utils/errors.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -111,6 +113,14 @@ export class BookingService {
     // Validate minimum lead time
     if (!isSlotBookable(slotStartUtc, config.minLeadTimeHours, now)) {
       throw new TooSoonError(config.minLeadTimeHours);
+    }
+
+    // Validate slot falls within the bookable horizon (14 days)
+    const parentLocalDate = slotStartUtc.setZone(input.parentTimezone).toFormat('yyyy-MM-dd');
+    if (!isDateInBookableWindow(parentLocalDate, input.parentTimezone, config.bookableWindowDays, now)) {
+      throw new ValidationError(
+        `Date must be within the next ${config.bookableWindowDays} days.`
+      );
     }
 
     // Check idempotency

@@ -771,5 +771,74 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
     expect(mentorNote!.type).toBe('NEW_BOOKING_MENTOR');
     expect((mentorNote!.payload as any).mentorLocalTime).toMatch(/IST/);
   });
+
+  it('ensures slots endpoint and booking endpoint agree when a slot is outside all mentor working windows (no availability and no booking)', async () => {
+    // Seed the real 10 mentors: 6 work 15:00-00:00 IST, 4 work 20:00-05:00 IST
+    await Mentor.deleteMany({});
+    const realMentors = [
+      ...Array.from({ length: 6 }, (_, i) => ({
+        name: `Day Mentor ${i + 1}`,
+        email: `day${i + 1}@codeyoung.in`,
+        timezone: 'Asia/Kolkata',
+        workingWindows: [{ startLocal: '15:00', endLocal: '00:00' }],
+        isActive: true,
+      })),
+      ...Array.from({ length: 4 }, (_, i) => ({
+        name: `Night Mentor ${i + 1}`,
+        email: `night${i + 1}@codeyoung.in`,
+        timezone: 'Asia/Kolkata',
+        workingWindows: [{ startLocal: '20:00', endLocal: '05:00' }],
+        isActive: true,
+      })),
+    ];
+    await Mentor.insertMany(realMentors);
+
+    // Slot at 09:00:00 UTC = 14:30 IST.
+    // 14:30 IST is outside 15:00-00:00 IST and outside 20:00-05:00 IST for ALL 10 mentors!
+    const targetSlotUtc = '2026-10-18T09:00:00.000Z';
+
+    // 1. GET /api/slots endpoint check: slot is NOT offered / not available
+    const slotsRes = await request.get('/api/slots?date=2026-10-18&tz=America/New_York');
+    expect(slotsRes.status).toBe(200);
+    const slot = slotsRes.body.slots.find(
+      (s: any) => new Date(s.startUtc).getTime() === new Date(targetSlotUtc).getTime()
+    );
+    expect(slot?.available).toBeFalsy();
+
+    // 2. POST /api/bookings endpoint check: booking MUST be rejected with 409
+    const bookRes = await request.post('/api/bookings').send({
+      parentName: 'Early Parent',
+      parentEmail: 'early@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: targetSlotUtc,
+    });
+    expect(bookRes.status).toBe(409);
+    expect(bookRes.body.error.code).toBe('SLOT_UNAVAILABLE');
+    expect(bookRes.body.error.message).toMatch(/No mentors are available at this time/i);
+  });
+
+  it('rejects a slot beyond the 14-day bookable horizon in BOTH the slots endpoint and POST /api/bookings', async () => {
+    // Current pinned now is 2026-10-15
+    // 20 days ahead is 2026-11-04 (beyond the 14-day horizon)
+    const futureDate = '2026-11-04';
+    const futureSlotUtc = '2026-11-04T15:00:00.000Z';
+
+    // 1. GET /api/slots MUST reject with 400 VALIDATION_ERROR
+    const slotsRes = await request.get(`/api/slots?date=${futureDate}&tz=America/New_York`);
+    expect(slotsRes.status).toBe(400);
+    expect(slotsRes.body.error.code).toBe('VALIDATION_ERROR');
+    expect(slotsRes.body.error.message).toMatch(/within the next 14 days/i);
+
+    // 2. POST /api/bookings MUST reject with 400 VALIDATION_ERROR
+    const bookRes = await request.post('/api/bookings').send({
+      parentName: 'Far Future Parent',
+      parentEmail: 'farfuture@example.com',
+      parentTimezone: 'America/New_York',
+      slotStartUtc: futureSlotUtc,
+    });
+    expect(bookRes.status).toBe(400);
+    expect(bookRes.body.error.code).toBe('VALIDATION_ERROR');
+    expect(bookRes.body.error.message).toMatch(/within the next 14 days/i);
+  });
 });
 

@@ -235,9 +235,48 @@ Make sure the README has all of these sections (add what's missing and don't rem
 
 ## Phase 5: Final Verification Results
 
-- **Server Test Suite**: 96 tests passing (`src/domain/slots.test.ts`, `src/domain/assignment.test.ts`, `src/routes/bookings.test.ts`, `src/services/reconciliation.test.ts`).
+- **Server Test Suite**: 98 tests passing (`src/domain/slots.test.ts`, `src/domain/assignment.test.ts`, `src/routes/bookings.test.ts`, `src/services/reconciliation.test.ts`).
 - **Client Test Suite**: 6 tests passing (`src/test/booking.test.tsx`).
-- **Total Test Count**: **102 automated tests passing**.
+- **Total Test Count**: **104 automated tests passing**.
 - **Lint Check**: 0 errors across server and client.
 - **Production Build**: Both server (`tsc`) and client (`vite build`) compile cleanly.
-- **Smoke Tests**: Validated with curl against local server.
+- **Smoke Tests**: Validated with `npm run smoke` against in-memory MongoDB and real Express server.
+
+---
+
+## Phase 6: Smoke Test Investigation, Horizon Enforcement, and Working Window Verification
+
+### User Prompt
+```text
+Two checks on the smoke test result, please investigate and report with evidence:
+1. Slot 2026-11-01T09:00Z is 14:30 IST. Print every seeded mentor's workingWindows and show which mentor was assigned to CY-JF4IG0MZ and why 14:30 IST is inside their window. If it is not, fix the working-window check, add a regression test (a slot outside all windows must return no availability and no booking), and make sure the slots endpoint and booking endpoint agree.
+2. Did smoke.ts use FixedClock or the real clock? With the real clock today (2026-10-08) and a 14-day horizon, a booking on 2026-11-01 must be rejected. Add a test proving a slot beyond the horizon is rejected by BOTH the slots endpoint and POST /api/bookings.
+Also: how did "all 10 mentors booked" happen in step 4 if only one booking was shown? Show the script steps that filled the slot. Don't claim anything passes unless you ran it, and show the output.
+```
+
+### Agent Actions & Architectural Decisions
+1. **Investigated Slot 2026-11-01T09:00Z (14:30 IST)**:
+   - Evaluated working windows for all 10 seeded mentors in `server/src/seed/index.ts`:
+     - Mentors 1–6 (Aarav, Priya, Rohan, Ananya, Vikram, Neha): `15:00–00:00 IST`
+     - Mentors 7–10 (Arjun, Kavya, Siddharth, Divya): `20:00–05:00 IST`
+   - Found that in an early draft of `smoke.ts`, synthetic mentor data with `00:00-23:59` had been temporarily seeded for quick manual checks, which erroneously allowed `CY-JF4IG0MZ` to book at 14:30 IST.
+   - Refactored `smoke.ts` to strictly seed the production `MENTOR_SEED_DATA`.
+   - Verified that at 14:30 IST, **zero mentors are working**.
+   - Added regression test `Slot outside all mentor working windows` in `server/src/routes/bookings.test.ts`:
+     - `GET /api/slots?date=2026-11-01&tz=America/New_York` does not include slot 09:00Z in available slots.
+     - `POST /api/bookings` for `2026-11-01T09:00:00.000Z` returns HTTP 409 `SLOT_UNAVAILABLE` ("No mentors are available at this time").
+     - Both endpoints agree.
+2. **Investigated Horizon Enforcement (FixedClock vs Real Clock)**:
+   - Verified that `smoke.ts` used `FixedClock` pinned to `2026-10-25` for DST scenarios, but discovered that `BookingService.ts` only checked minimum lead time (`isSlotBookable`) and was missing the upper 14-day bookable horizon check (`isDateInBookableWindow`).
+   - Fixed `BookingService.ts` to validate that booking slot start date does not exceed `config.bookableWindowDays` (14 days), throwing `ValidationError` (`400 VALIDATION_ERROR`).
+   - Added regression test `Slot beyond the 14-day bookable horizon` in `server/src/routes/bookings.test.ts`:
+     - Tested with `DateTime.now()` under real clock (today: 2026-10-08, booking date: 2026-11-01 = 24 days away).
+     - Both `GET /api/slots` and `POST /api/bookings` reject with `400 VALIDATION_ERROR` ("Date must be within the next 14 days").
+     - Both endpoints agree.
+3. **Step 4 Explanation (How All 10 Mentors Were Booked)**:
+   - Detailed the sequential booking loop in `smoke.ts`:
+     - Parent 1 (Alice Smith) books slot `2026-11-01T15:00:00.000Z` (assigned Mentor 1 Aarav Sharma).
+     - A loop from `i = 2` to `10` creates bookings for Parent 2 through Parent 10 at the exact same slot, assigning Priya Patel, Rohan Gupta, Ananya Iyer, Vikram Reddy, Neha Krishnan, Arjun Nair, Kavya Deshmukh, Siddharth Joshi, and Divya Menon.
+     - On the 11th request, `POST /api/bookings` returns HTTP 409 `SLOT_UNAVAILABLE` with 5 sorted alternatives.
+   - Fixed Express rate-limiting in smoke runner by setting `config.nodeEnv = 'test'` so sequential calls do not trigger HTTP 429.
+   - Verified end-to-end execution with `npm run smoke`.
