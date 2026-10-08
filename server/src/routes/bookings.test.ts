@@ -84,7 +84,9 @@ beforeAll(async () => {
 afterAll(async () => {
   resetClock();
   await mongoose.disconnect();
-  await mongoServer.stop();
+  if (mongoServer) {
+    await mongoServer.stop();
+  }
 });
 
 beforeEach(async () => {

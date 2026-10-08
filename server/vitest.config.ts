@@ -6,6 +6,7 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 60000,
     hookTimeout: 120000,
+    fileParallelism: false,
     include: ['src/**/*.test.ts'],
     coverage: {
       provider: 'v8',

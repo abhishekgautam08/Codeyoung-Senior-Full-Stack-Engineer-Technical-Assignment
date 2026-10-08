@@ -13,7 +13,8 @@
     "test:client": "npm run test --workspace=client",
     "lint": "npm run lint --workspace=server && npm run lint --workspace=client",
     "seed": "npm run seed --workspace=server",
-    "seed:demo": "npm run seed:demo --workspace=server"
+    "seed:demo": "npm run seed:demo --workspace=server",
+    "reconcile": "npm run reconcile --workspace=server"
   },
   "workspaces": [
     "server",
