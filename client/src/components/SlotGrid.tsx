@@ -48,7 +48,9 @@ export const SlotGrid: React.FC<SlotGridProps> = ({
     { label: 'Evening Slots', icon: Moon, slots: evening, color: 'text-indigo-400' },
   ].filter((g) => g.slots.length > 0);
 
-  const availableCount = slots.filter((s) => s.isAvailable && s.isBookable).length;
+  const availableCount = slots.filter(
+    (s) => (s.isAvailable ?? (s as any).available) && (s.isBookable ?? true)
+  ).length;
 
   if (slots.length === 0 || availableCount === 0) {
     return (
@@ -56,7 +58,7 @@ export const SlotGrid: React.FC<SlotGridProps> = ({
         <AlertCircle className="w-10 h-10 text-amber-400/80 mx-auto mb-3" />
         <h4 className="text-base font-semibold text-slate-200">No Slots Available for this Date</h4>
         <p className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
-          All mentor slots on this date are either fully booked, past the 2-hour lead time, or outside mentor working windows (15:00–05:00 IST).
+          All mentor slots on this date are either fully booked, past the 2-hour lead time, or outside mentor working windows (15:00–08:00 IST).
         </p>
         <p className="text-xs text-indigo-400 mt-3 font-medium">
           💡 Try picking the next day or a different timezone above to view open slots.
@@ -78,18 +80,19 @@ export const SlotGrid: React.FC<SlotGridProps> = ({
               {label}
             </h4>
             <span className="text-[11px] text-slate-500 font-medium">
-              ({groupSlots.filter((s) => s.isAvailable && s.isBookable).length} open)
+              ({groupSlots.filter((s) => (s.isAvailable ?? (s as any).available) && (s.isBookable ?? true)).length} open)
             </span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
             {groupSlots.map((slot) => {
-              const isSelected = selectedSlot?.slotStartUtc === slot.slotStartUtc;
-              const canBook = slot.isAvailable && slot.isBookable;
+              const startKey = slot.slotStartUtc || (slot as any).startUtc;
+              const isSelected = (selectedSlot?.slotStartUtc || (selectedSlot as any)?.startUtc) === startKey;
+              const canBook = Boolean((slot.isAvailable ?? (slot as any).available) && (slot.isBookable ?? true));
 
               return (
                 <button
-                  key={slot.slotStartUtc}
+                  key={startKey}
                   type="button"
                   disabled={!canBook}
                   onClick={() => onSelectSlot(slot)}
@@ -104,15 +107,19 @@ export const SlotGrid: React.FC<SlotGridProps> = ({
                   <div className="flex items-start justify-between gap-1 w-full">
                     <div>
                       <div className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                        <span>{slot.localStartTime}</span>
-                        <span className="text-xs font-normal text-slate-400">
-                          – {slot.localEndTime}
-                        </span>
+                        <span>{slot.localStartTime || (slot as any).localStart?.split(' · ')[1] || slot.slotStartUtc}</span>
+                        {slot.localEndTime && (
+                          <span className="text-xs font-normal text-slate-400">
+                            – {slot.localEndTime}
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5 font-mono">
-                        <Clock className="w-3 h-3 text-slate-500" />
-                        <span>{slot.mentorIstInfo.formatted}</span>
-                      </div>
+                      {slot.mentorIstInfo?.formatted && (
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5 font-mono">
+                          <Clock className="w-3 h-3 text-slate-500" />
+                          <span>{slot.mentorIstInfo.formatted}</span>
+                        </div>
+                      )}
                     </div>
 
                     {isSelected && (
@@ -124,7 +131,7 @@ export const SlotGrid: React.FC<SlotGridProps> = ({
                   <div className="mt-2 flex items-center justify-between text-[10px]">
                     {canBook ? (
                       <span className="font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
-                        {slot.availableMentorsCount} mentor{slot.availableMentorsCount > 1 ? 's' : ''} free
+                        {(slot.availableMentorsCount ?? 1)} mentor{(slot.availableMentorsCount ?? 1) > 1 ? 's' : ''} free
                       </span>
                     ) : (
                       <span className="font-normal text-slate-500 italic">

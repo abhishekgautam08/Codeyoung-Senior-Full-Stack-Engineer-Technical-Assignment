@@ -10,6 +10,7 @@ import {
   isSlotBookable,
   getTimeOfDay,
   getMentorLocalDate,
+  getTimezoneAbbr,
 } from '../domain/index.js';
 import { ValidationError } from '../utils/errors.js';
 import { config } from '../config/index.js';
@@ -95,73 +96,90 @@ slotsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
 
     // Build slot availability
     const slots = slotStartsUtc.map((slotUtc) => {
+      const slotEndUtc = slotUtc.plus({ minutes: config.slotDurationMinutes });
       const slotInfo = buildSlotInfo(slotUtc, config.slotDurationMinutes, tz);
       const bookable = isSlotBookable(slotUtc, config.minLeadTimeHours, now);
 
-      if (!bookable) {
-        return {
-          ...slotInfo,
-          available: false,
-          limited: false,
-          timeOfDay: getTimeOfDay(slotUtc, tz),
-        };
-      }
+      const localStartDt = slotUtc.setZone(tz);
+      const localEndDt = slotEndUtc.setZone(tz);
+      const localStartTime = localStartDt.toFormat('h:mm a');
+      const localEndTime = localEndDt.toFormat('h:mm a');
+      const formattedLocal = `${localStartTime} – ${localEndTime} ${slotInfo.tzAbbr}`;
 
-      // Count how many mentors are available for this slot
+      const istDt = slotUtc.setZone('Asia/Kolkata');
+      const mentorIstInfo = {
+        time: istDt.toFormat('HH:mm'),
+        date: istDt.toFormat('yyyy-MM-dd'),
+        formatted: `${istDt.toFormat('h:mm a')} IST (${istDt.toFormat('LLL d')})`,
+      };
+
+      let totalMentorsWorking = 0;
       let availableMentors = 0;
+
       for (const mentor of mentors) {
-        // Check if mentor works at this time
         if (
-          !isMentorWorkingAtUtc(
+          isMentorWorkingAtUtc(
             slotUtc,
             mentor.timezone,
             mentor.workingWindows,
             config.slotDurationMinutes
           )
         ) {
-          continue;
-        }
+          totalMentorsWorking++;
 
-        // Check if mentor already has a booking at this slot
-        const slotKey = `${mentor._id.toString()}_${slotUtc.toISO()}`;
-        if (bookedSet.has(slotKey)) {
-          continue;
+          const slotKey = `${mentor._id.toString()}_${slotUtc.toISO()}`;
+          if (!bookedSet.has(slotKey)) {
+            const mentorDate = getMentorLocalDate(slotUtc.toJSDate(), mentor.timezone);
+            const loadKey = `${mentor._id.toString()}_${mentorDate}`;
+            const currentLoad = dailyLoadMap.get(loadKey) ?? 0;
+            if (currentLoad < config.maxBookingsPerMentorPerDay) {
+              availableMentors++;
+            }
+          }
         }
+      }
 
-        // Check daily capacity
-        const mentorDate = getMentorLocalDate(slotUtc.toJSDate(), mentor.timezone);
-        const loadKey = `${mentor._id.toString()}_${mentorDate}`;
-        const currentLoad = dailyLoadMap.get(loadKey) ?? 0;
-        if (currentLoad >= config.maxBookingsPerMentorPerDay) {
-          continue;
-        }
-
-        availableMentors++;
+      const isAvailable = bookable && availableMentors > 0;
+      let disabledReason: string | undefined = undefined;
+      if (!bookable) {
+        disabledReason = 'Past 2h lead time';
+      } else if (availableMentors === 0) {
+        disabledReason = 'Fully booked';
       }
 
       return {
         ...slotInfo,
-        available: availableMentors > 0,
-        limited: availableMentors === 1,
+        slotStartUtc: slotUtc.toISO()!,
+        slotEndUtc: slotEndUtc.toISO()!,
+        localStartTime,
+        localEndTime,
+        formattedLocal,
         timeOfDay: getTimeOfDay(slotUtc, tz),
+        isBookable: bookable,
+        isAvailable,
+        available: isAvailable,
+        limited: availableMentors === 1,
+        availableMentorsCount: availableMentors,
+        totalMentorsWorking,
+        mentorIstInfo,
+        disabledReason,
       };
     });
 
     // Filter to only slots where at least one mentor is working
-    const relevantSlots = slots.filter((slot) => {
-      // Keep slots that have available mentors or are booked-but-during-working-hours
-      const slotUtc = DateTime.fromISO(slot.startUtc);
-      return mentors.some((m) =>
-        isMentorWorkingAtUtc(
-          slotUtc,
-          m.timezone,
-          m.workingWindows,
-          config.slotDurationMinutes
-        )
-      );
-    });
+    const relevantSlots = slots.filter((slot) => slot.totalMentorsWorking > 0);
 
-    res.json({ slots: relevantSlots, date, timezone: tz });
+    const primaryTzAbbr =
+      slotStartsUtc.length > 0 ? getTimezoneAbbr(slotStartsUtc[0], tz) : '';
+
+    res.json({
+      slots: relevantSlots,
+      date,
+      timezone: tz,
+      tzAbbr: primaryTzAbbr,
+      totalSlots: relevantSlots.length,
+      availableSlots: relevantSlots.filter((s) => s.available).length,
+    });
   } catch (err) {
     next(err);
   }
