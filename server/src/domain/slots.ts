@@ -12,6 +12,7 @@
  */
 
 import { DateTime, IANAZone } from 'luxon';
+import { getTimezoneAbbr } from './timezone.js';
 import type { IWorkingWindow } from '../models/Mentor.js';
 import { getClock, type Clock } from '../utils/clock.js';
 
@@ -101,10 +102,7 @@ export function utcToLocal(utcInstant: DateTime | Date, tz: string) {
       ? DateTime.fromJSDate(utcInstant, { zone: 'utc' }).setZone(tz)
       : utcInstant.setZone(tz);
 
-  let tzAbbr = dt.toFormat('ZZZZ');
-  if (tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta') {
-    tzAbbr = 'IST';
-  }
+  const tzAbbr = getTimezoneAbbr(dt, tz);
 
   return {
     localISO: dt.toISO()!,

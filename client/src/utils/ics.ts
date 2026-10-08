@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon';
 import type { Booking } from '../types/index.js';
 
+import { getTimezoneAbbr } from './timezone.js';
+
 /**
  * Generates an iCalendar (.ics) string for a confirmed booking and downloads it.
  */
@@ -13,12 +15,21 @@ export function downloadBookingIcs(booking: Booking): void {
   const mentorName = typeof booking.mentorId === 'object' ? booking.mentorId.name : 'Your Codeyoung Mentor';
   const mentorEmail = typeof booking.mentorId === 'object' ? booking.mentorId.email : 'mentor@codeyoung.in';
 
+  const parentStart = DateTime.fromISO(booking.slotStartUtc).setZone(booking.parentTimezone);
+  const parentTzAbbr = getTimezoneAbbr(parentStart, booking.parentTimezone);
+  const parentTimeStr = `${parentStart.toFormat('EEE, d MMM yyyy · h:mm a')} ${parentTzAbbr}`;
+
+  const mentorStart = DateTime.fromISO(booking.slotStartUtc).setZone('Asia/Kolkata');
+  const mentorTimeStr = `${mentorStart.toFormat('EEE, d MMM yyyy · h:mm a')} IST`;
+
   const summary = `Codeyoung 1:1 Live Coding Trial Class`;
   const description = [
     `Welcome to your Codeyoung 1:1 Live Coding Trial Session!`,
     ``,
     `Student: ${booking.childName || booking.parentName}`,
     `Mentor: ${mentorName}`,
+    `Class Time: ${parentTimeStr}`,
+    `Mentor Time: ${mentorTimeStr}`,
     `Booking Reference: ${booking.bookingRef}`,
     `Join Meeting: ${booking.meetingLink}`,
     ``,

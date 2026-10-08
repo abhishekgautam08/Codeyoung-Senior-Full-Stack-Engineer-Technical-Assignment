@@ -5,10 +5,29 @@ export interface Clock {
 }
 
 export class SystemClock implements Clock {
+  private static warned = false;
+
+  public static resetWarningState(): void {
+    SystemClock.warned = false;
+  }
+
   now(): DateTime {
-    const offsetDays = Number(process.env.FAKE_CLOCK_OFFSET_DAYS || 0);
-    const nowUtc = DateTime.utc();
-    return offsetDays !== 0 ? nowUtc.plus({ days: offsetDays }) : nowUtc;
+    const rawOffset = process.env.FAKE_CLOCK_OFFSET_DAYS;
+    const offsetDays = Number(rawOffset || 0);
+    const nodeEnv = process.env.NODE_ENV || 'development';
+
+    // Only honor FAKE_CLOCK_OFFSET_DAYS when NODE_ENV is 'test' or 'development'
+    if (offsetDays !== 0 && (nodeEnv === 'test' || nodeEnv === 'development')) {
+      if (!SystemClock.warned) {
+        console.warn(
+          `[SystemClock WARNING] FAKE_CLOCK_OFFSET_DAYS active (+${offsetDays} days). NODE_ENV=${nodeEnv}.`
+        );
+        SystemClock.warned = true;
+      }
+      return DateTime.utc().plus({ days: offsetDays });
+    }
+
+    return DateTime.utc();
   }
 }
 

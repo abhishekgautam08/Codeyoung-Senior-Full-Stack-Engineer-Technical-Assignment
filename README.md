@@ -166,6 +166,7 @@ cp .env.example .env
 | `BOOKABLE_WINDOW_DAYS` | `14` | Forward booking horizon |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limiter observation window (1 minute) |
 | `RATE_LIMIT_MAX_REQUESTS` | `100` | Max requests per IP per window |
+| `FAKE_CLOCK_OFFSET_DAYS` | `0` | Simulates forward time drift in days; active ONLY in `test` or `development`, ignored in `production` |
 
 ### 5. Seed Database (Idempotent)
 Seeds the 10 Indian mentors with their respective working windows (`15:00–00:00 IST` and `20:00–05:00 IST`):
@@ -324,6 +325,13 @@ To provide comprehensive global coverage while enabling US parents to book trial
 | **Shift 2 (Night)** | 3 mentors (Vikram, Neha, Arjun) | `20:00 – 05:00 IST` | `10:30 – 19:30 EDT`<br>`09:30 – 18:30 EST` | `07:30 – 16:30 PDT`<br>`06:30 – 15:30 PST` | `15:30 – 00:30 BST`<br>`14:30 – 23:30 GMT` | UK Late Evening; US Afternoon & Early Evening |
 | **Shift 3 (Late Night / US Evening)** | 3 mentors (Kavya, Siddharth, Divya) | `22:00 – 08:00 IST` | `12:30 – 22:30 EDT`<br>`11:30 – 21:30 EST` | `09:30 – 19:30 PDT`<br>`08:30 – 18:30 PST` | `17:30 – 03:30 BST`<br>`16:30 – 02:30 GMT` | **US Evening (up to 10:30 PM EDT / 9:30 PM EST)**; US PT Evening |
 | **Full Overlap Window** | **All 10 mentors active** | `22:00 – 00:00 IST` | `12:30 – 14:30 EDT`<br>`11:30 – 13:30 EST` | `09:30 – 11:30 PDT`<br>`08:30 – 10:30 PST` | `17:30 – 19:30 BST`<br>`16:30 – 18:30 GMT` | Peak Transatlantic Capacity (all 10 mentors available) |
+
+### Evening Capacity & Horizontal Scalability
+- **Current Evening Pool**: In US evening hours (6:00 PM – 10:30 PM EDT), 3 to 6 mentors are active (Shift 2 and Shift 3). Under the fixed business rule of **max 2 trial classes per mentor per IST day**, the current seed supports 6 to 12 trial bookings each evening.
+- **Extending Evening Capacity**:
+  1. **Add More Mentors**: Because mentor shifts and capacity are stored as data in MongoDB rather than hardcoded in application logic, adding additional mentors to `server/src/seed/index.ts` instantly scales evening capacity (+2 classes/day per mentor) without code changes.
+  2. **Configurable Shift Windows**: Mentor working windows in MongoDB accept any custom intervals (e.g., dedicated US evening shifts, weekend specials).
+  3. **Capacity Constant Adjustment**: Changing `MAX_BOOKINGS_PER_MENTOR_PER_DAY` in `.env` immediately raises the daily ceiling across all shifts.
 
 ---
 

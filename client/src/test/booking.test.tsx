@@ -5,6 +5,7 @@ import { BookingForm } from '../components/BookingForm.js';
 import { ConflictModal } from '../components/ConflictModal.js';
 import { api } from '../api/client.js';
 import type { SlotItem } from '../types/index.js';
+import { formatTimeRange, formatDateTimeNice } from '../utils/date.js';
 
 // Mock API client
 vi.mock('../api/client.js', () => ({
@@ -302,4 +303,101 @@ describe('Client Unit & Component Tests', () => {
       expect(screen.getByText(/confirming booking\.\.\./i)).toBeInTheDocument();
     });
   });
+
+  describe('6. Canonical Timezone Formatting & Slot Labels (London BST/GMT & Dublin IST (Ireland)/GMT)', () => {
+    it('formats time ranges with BST for Europe/London in summer and GMT in winter', () => {
+      const londonSummerRange = formatTimeRange(
+        '2026-07-15T10:00:00.000Z',
+        '2026-07-15T10:30:00.000Z',
+        'Europe/London'
+      );
+      expect(londonSummerRange).toBe('11:00 AM – 11:30 AM BST');
+
+      const londonWinterRange = formatTimeRange(
+        '2026-01-15T10:00:00.000Z',
+        '2026-01-15T10:30:00.000Z',
+        'Europe/London'
+      );
+      expect(londonWinterRange).toBe('10:00 AM – 10:30 AM GMT');
+    });
+
+    it('formats time ranges with "IST (Ireland)" for Europe/Dublin in summer and GMT in winter', () => {
+      const dublinSummerRange = formatTimeRange(
+        '2026-07-15T10:00:00.000Z',
+        '2026-07-15T10:30:00.000Z',
+        'Europe/Dublin'
+      );
+      expect(dublinSummerRange).toBe('11:00 AM – 11:30 AM IST (Ireland)');
+
+      const dublinWinterRange = formatTimeRange(
+        '2026-01-15T10:00:00.000Z',
+        '2026-01-15T10:30:00.000Z',
+        'Europe/Dublin'
+      );
+      expect(dublinWinterRange).toBe('10:00 AM – 10:30 AM GMT');
+    });
+
+    it('formats display dates nicely with zone abbreviations in parentheses', () => {
+      const londonSummerNice = formatDateTimeNice('2026-07-15T10:00:00.000Z', 'Europe/London');
+      expect(londonSummerNice).toContain('(BST)');
+
+      const londonWinterNice = formatDateTimeNice('2026-01-15T10:00:00.000Z', 'Europe/London');
+      expect(londonWinterNice).toContain('(GMT)');
+
+      const dublinSummerNice = formatDateTimeNice('2026-07-15T10:00:00.000Z', 'Europe/Dublin');
+      expect(dublinSummerNice).toContain('(IST (Ireland))');
+
+      const dublinWinterNice = formatDateTimeNice('2026-01-15T10:00:00.000Z', 'Europe/Dublin');
+      expect(dublinWinterNice).toContain('(GMT)');
+    });
+
+    it('renders client slot grid with localStartTime and localEndTime for London and Dublin slots', () => {
+      const londonSlot: SlotItem = {
+        slotStartUtc: '2026-07-15T10:00:00.000Z',
+        slotEndUtc: '2026-07-15T10:30:00.000Z',
+        localStartTime: '11:00 AM',
+        localEndTime: '11:30 AM',
+        formattedLocal: '11:00 AM – 11:30 AM BST',
+        timeOfDay: 'morning',
+        isBookable: true,
+        isAvailable: true,
+        availableMentorsCount: 3,
+        totalMentorsWorking: 4,
+        mentorIstInfo: { time: '15:30', date: '2026-07-15', formatted: '3:30 PM IST (Jul 15)' },
+      };
+
+      const dublinSlot: SlotItem = {
+        slotStartUtc: '2026-07-15T18:00:00.000Z',
+        slotEndUtc: '2026-07-15T18:30:00.000Z',
+        localStartTime: '7:00 PM',
+        localEndTime: '7:30 PM',
+        formattedLocal: '7:00 PM – 7:30 PM IST (Ireland)',
+        timeOfDay: 'evening',
+        isBookable: true,
+        isAvailable: true,
+        availableMentorsCount: 2,
+        totalMentorsWorking: 3,
+        mentorIstInfo: { time: '23:30', date: '2026-07-15', formatted: '11:30 PM IST (Jul 15)' },
+      };
+
+      render(
+        <SlotGrid
+          slots={[londonSlot, dublinSlot]}
+          selectedSlot={null}
+          onSelectSlot={vi.fn()}
+          isLoading={false}
+          parentTimezone="Europe/London"
+        />
+      );
+
+      expect(screen.getByText('11:00 AM')).toBeInTheDocument();
+      expect(screen.getByText('– 11:30 AM')).toBeInTheDocument();
+      expect(screen.getByText('3:30 PM IST (Jul 15)')).toBeInTheDocument();
+
+      expect(screen.getByText('7:00 PM')).toBeInTheDocument();
+      expect(screen.getByText('– 7:30 PM')).toBeInTheDocument();
+      expect(screen.getByText('11:30 PM IST (Jul 15)')).toBeInTheDocument();
+    });
+  });
 });
+

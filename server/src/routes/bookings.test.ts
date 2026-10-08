@@ -773,6 +773,43 @@ describe('Backend Edge Cases (Assignment Specification)', () => {
     expect((mentorNote!.payload as any).mentorLocalTime).toMatch(/IST/);
   });
 
+  it('formats parentLocalTime and notification payload with BST for London and IST (Ireland) for Dublin in summer', async () => {
+    const summerNow = DateTime.fromISO('2026-07-10T10:00:00.000Z');
+    setClock(new FixedClock(summerNow));
+
+    const slotLondon = '2026-07-14T14:00:00.000Z';
+    const londonRes = await request.post('/api/bookings').send({
+      parentName: 'London Parent',
+      parentEmail: 'london.parent@test.com',
+      parentTimezone: 'Europe/London',
+      slotStartUtc: slotLondon,
+    });
+    expect(londonRes.status).toBe(201);
+    expect(londonRes.body.booking.parentLocalTime).toContain('BST');
+
+    const londonNotes = await Notification.find({
+      recipient: 'london.parent@test.com',
+    }).lean();
+    expect(londonNotes.length).toBe(1);
+    expect((londonNotes[0].payload as any).parentLocalTime).toContain('BST');
+
+    const slotDublin = '2026-07-14T14:30:00.000Z';
+    const dublinRes = await request.post('/api/bookings').send({
+      parentName: 'Dublin Parent',
+      parentEmail: 'dublin.parent@test.com',
+      parentTimezone: 'Europe/Dublin',
+      slotStartUtc: slotDublin,
+    });
+    expect(dublinRes.status).toBe(201);
+    expect(dublinRes.body.booking.parentLocalTime).toContain('IST (Ireland)');
+
+    const dublinNotes = await Notification.find({
+      recipient: 'dublin.parent@test.com',
+    }).lean();
+    expect(dublinNotes.length).toBe(1);
+    expect((dublinNotes[0].payload as any).parentLocalTime).toContain('IST (Ireland)');
+  });
+
   it('ensures slots endpoint and booking endpoint agree when a slot is outside all mentor working windows (no availability and no booking)', async () => {
     // Seed the 10 mentors: 4 work 15:00-00:00 IST, 3 work 20:00-05:00 IST, 3 work 22:00-08:00 IST
     await Mentor.deleteMany({});

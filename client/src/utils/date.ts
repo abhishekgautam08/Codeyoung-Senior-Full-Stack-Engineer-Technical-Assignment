@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { getTimezoneAbbr } from './timezone.js';
 
 export function getUserTimezone(): string {
   try {
@@ -53,13 +54,15 @@ export function getBookableDates(daysAhead = 14, zone = 'America/New_York'): Arr
 
 export function formatDateTimeNice(utcIso: string, zone: string): string {
   const dt = DateTime.fromISO(utcIso).setZone(zone);
-  return dt.toFormat('cccc, LLLL d, yyyy · h:mm a (ZZZZ)');
+  const abbr = getTimezoneAbbr(dt, zone);
+  return `${dt.toFormat('cccc, LLLL d, yyyy · h:mm a')} (${abbr})`;
 }
 
 export function formatTimeRange(startUtc: string, endUtc: string, zone: string): string {
   const start = DateTime.fromISO(startUtc).setZone(zone);
   const end = DateTime.fromISO(endUtc).setZone(zone);
-  return `${start.toFormat('h:mm a')} – ${end.toFormat('h:mm a ZZZZ')}`;
+  const abbr = getTimezoneAbbr(start, zone);
+  return `${start.toFormat('h:mm a')} – ${end.toFormat('h:mm a')} ${abbr}`;
 }
 
 export function formatIstTime(utcIso: string): string {

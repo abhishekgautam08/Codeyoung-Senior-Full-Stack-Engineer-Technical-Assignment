@@ -328,3 +328,65 @@ Final fixes, please run everything and show real output:
    - **Total Tests**: **106 tests passing (100%)**
    - **Lint**: 0 errors
    - **Build**: Server (`tsc`) and client (`vite build`) compile cleanly.
+
+---
+
+## Phase 8: Clock Mode Transparency, Canonical Timezone Abbreviations (BST/GMT & IST (Ireland)), and Environment Security Guards
+
+### User Prompt
+```text
+Three last fixes, show real output:
+1. Smoke test Check 4 books 2026-10-28 and succeeds, but under the real clock (today 2026-10-08) that is 20 days away and should be rejected. Explain exactly which clock Check 4 used. Make smoke.ts print the clock mode (real / fixed / offset) at the start of each check. Use a pinned FixedClock for checks that need dates beyond 14 days, and make sure no check silently mixes clocks.
+2. Zone abbreviations: Europe/London currently renders "GMT+1". Render BST/GMT for Europe/London, and for Europe/Dublin render "IST (Ireland)" in summer and "GMT" in winter, so it can't be confused with India's IST. Apply this in the API responses, the client, the .ics description and the notification payloads, via a single shared formatter. Add tests for London and Dublin in winter and summer, and for the client slot labels.
+3. Only honor FAKE_CLOCK_OFFSET_DAYS when NODE_ENV is "test" or "development" (log a warning when active), and document it in the README and .env.example. Add a test that it is ignored when NODE_ENV=production.
+Also add a short README note under assumptions/limitations about evening capacity (only 3 to 6 mentors, max 2 classes each per day) and how to extend it (more mentors or shifts via seed data).
+Then run lint, build, all tests, and the smoke test, update TRANSCRIPT.md, commit, and report the counts.
+```
+
+### Agent Actions & Architectural Decisions
+
+1. **Smoke Test Clock Mode Transparency (Item 1)**:
+   - **Clock Mode Explanation**: Check 4 in `smoke.ts` used a deterministic `FixedClock` pinned to `2026-10-25T10:00:00.000Z`. Relative to this pinned clock, `2026-10-28` is exactly 3 days away (well within the 14-day booking horizon). Under the real clock (today: 2026-10-08), `2026-10-28` would be 20 days in the future and rejected with HTTP 400 `VALIDATION_ERROR` ("Date must be within the next 14 days."). Pinned `FixedClock` was used so that multi-mentor saturation (all 10 mentors filled), 409 conflict handling, and `CY-XXXXXXXX` formatting could be executed deterministically without race conditions or test expiration.
+   - **Explicit Clock Mode Logging**: Implemented `getClockMode()` in `smoke.ts` to inspect the active clock state and print explicit headers at each check:
+     - Check 1: `Clock Mode: real (<ISO timestamp>)`
+     - Check 2: `Clock Mode: real (<ISO timestamp>)`
+     - Check 3: `Clock Mode: real (<ISO timestamp>)`
+     - Check 4: `Clock Mode: fixed (pinned to 2026-10-25T15:30:00.000+05:30)`
+     - Post-Smoke Teardown: `Clock Mode: RESET to SystemClock (<ISO timestamp>)`
+   - Ensured zero silent clock mixing between checks.
+
+2. **Canonical Timezone Abbreviations (Item 2)**:
+   - **Shared Timezone Formatter**: Created canonical shared formatter modules:
+     - `server/src/domain/timezone.ts` and `client/src/utils/timezone.ts`:
+       - `Europe/London`: Renders `BST` in summer and `GMT` in winter.
+       - `Europe/Dublin`: Renders `IST (Ireland)` in summer and `GMT` in winter, completely eliminating ambiguity with Indian Standard Time (`IST`).
+       - `Asia/Kolkata` / `Asia/Calcutta`: Renders `IST` year-round.
+       - US Zones: `EDT`/`EST`, `CDT`/`CST`, `MDT`/`MST`, `PDT`/`PST`, `MST` (Phoenix - no DST), `AKDT`/`AKST`, `HST`.
+   - **Full End-to-End Propagation**:
+     - **API Responses**: Integrated into `utcToLocal`, `buildSlotInfo`, `formatBookingResult`, and `findAlternatives` in `server/src/domain/slots.ts` and `server/src/services/BookingService.ts`.
+     - **Client UI**: Applied in `client/src/utils/date.ts` (`formatTimeRange`, `formatDateTimeNice`) and rendered inside `SlotGrid` and confirmation cards.
+     - **RFC 5545 `.ics` Description**: Applied in `client/src/utils/ics.ts` to include parent local time with proper abbreviation (e.g. `BST` / `IST (Ireland)`) and mentor IST time.
+     - **Notification Payloads**: Handled through `BookingResult.parentLocalTime` written to the MongoDB outbox collection (`notifications`).
+   - **Comprehensive Tests**:
+     - Unit tests in `server/src/domain/slots.test.ts` for London and Dublin in summer (`2026-07-15`) and winter (`2026-01-15`).
+     - Integration test in `server/src/routes/bookings.test.ts` proving booking API responses and notifications carry `BST` for London and `IST (Ireland)` for Dublin.
+     - Client tests in `client/src/test/booking.test.tsx` verifying `formatTimeRange`, `formatDateTimeNice`, and `SlotGrid` slot card labels.
+
+3. **`FAKE_CLOCK_OFFSET_DAYS` Security Guards (Item 3)**:
+   - **Production Guard**: Enforced in `server/src/utils/clock.ts` so `FAKE_CLOCK_OFFSET_DAYS` is strictly ignored when `NODE_ENV === 'production'`. In production, `SystemClock.now()` strictly returns `DateTime.utc()`.
+   - **Warning Logs**: When active in `test` or `development` environments, logs `[SystemClock WARNING] FAKE_CLOCK_OFFSET_DAYS active (+N days). NODE_ENV=<env>.` once.
+   - **Documentation**: Documented in `README.md` and `.env.example`.
+   - **Automated Tests**: Added tests in `server/src/domain/slots.test.ts` asserting that `FAKE_CLOCK_OFFSET_DAYS` is ignored when `NODE_ENV=production` and honored with a warning when `NODE_ENV=test` and `NODE_ENV=development`.
+
+4. **Evening Capacity Documentation**:
+   - Added documentation in `README.md` under `Assumptions & Trade-offs > Evening Capacity & Horizontal Scalability`:
+     - Details that 3 to 6 mentors are active in US evening hours (6:00 PM – 10:30 PM EDT) across Shifts 2 and 3.
+     - Explains the daily ceiling of 6 to 12 trial classes per evening under the 2-class/day cap.
+     - Details how to scale capacity horizontally by adding mentors to `server/src/seed/index.ts` (+2 classes/mentor/day), adjusting shift intervals, or raising `MAX_BOOKINGS_PER_MENTOR_PER_DAY`.
+
+5. **Verification & Quality Gate Execution**:
+   - **`npm run lint`**: 0 errors.
+   - **`npm run build`**: Clean TypeScript compilation (`tsc`) on server and Vite bundle on client.
+   - **`npm test`**: **118 passed across 5 test files** (108 server + 10 client).
+   - **`npm run smoke`**: All 5 smoke checks passed end-to-end with real and fixed clock modes transparently printed.
+

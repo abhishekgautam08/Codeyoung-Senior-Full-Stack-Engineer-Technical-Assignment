@@ -526,3 +526,136 @@ describe('Clock independence & Pinned Time Tests', () => {
     expect(futureBookable).toEqual(baseBookable);
   });
 });
+
+import { getTimezoneAbbr, formatTimeWithAbbr, formatFullLocalTime } from '../domain/timezone.js';
+import { SystemClock } from '../utils/clock.js';
+import { vi } from 'vitest';
+
+describe('Shared Canonical Timezone Formatter (London BST/GMT & Dublin IST (Ireland)/GMT)', () => {
+  it('renders BST for Europe/London in summer and GMT in winter', () => {
+    const summer = DateTime.fromISO('2026-07-15T14:00:00.000Z', { zone: 'Europe/London' });
+    const winter = DateTime.fromISO('2026-01-15T14:00:00.000Z', { zone: 'Europe/London' });
+
+    expect(getTimezoneAbbr(summer, 'Europe/London')).toBe('BST');
+    expect(getTimezoneAbbr(winter, 'Europe/London')).toBe('GMT');
+
+    expect(formatTimeWithAbbr(summer, 'Europe/London')).toBe('3:00 PM BST');
+    expect(formatTimeWithAbbr(winter, 'Europe/London')).toBe('2:00 PM GMT');
+    expect(formatFullLocalTime(summer, 'Europe/London')).toContain('BST');
+    expect(formatFullLocalTime(winter, 'Europe/London')).toContain('GMT');
+  });
+
+  it('renders "IST (Ireland)" for Europe/Dublin in summer and GMT in winter to prevent ambiguity with India IST', () => {
+    const summer = DateTime.fromISO('2026-07-15T14:00:00.000Z', { zone: 'Europe/Dublin' });
+    const winter = DateTime.fromISO('2026-01-15T14:00:00.000Z', { zone: 'Europe/Dublin' });
+
+    expect(getTimezoneAbbr(summer, 'Europe/Dublin')).toBe('IST (Ireland)');
+    expect(getTimezoneAbbr(winter, 'Europe/Dublin')).toBe('GMT');
+
+    expect(formatTimeWithAbbr(summer, 'Europe/Dublin')).toBe('3:00 PM IST (Ireland)');
+    expect(formatTimeWithAbbr(winter, 'Europe/Dublin')).toBe('2:00 PM GMT');
+    expect(formatFullLocalTime(summer, 'Europe/Dublin')).toContain('IST (Ireland)');
+    expect(formatFullLocalTime(winter, 'Europe/Dublin')).toContain('GMT');
+  });
+
+  it('renders IST for Asia/Kolkata regardless of season', () => {
+    const summer = DateTime.fromISO('2026-07-15T14:00:00.000Z', { zone: 'Asia/Kolkata' });
+    const winter = DateTime.fromISO('2026-01-15T14:00:00.000Z', { zone: 'Asia/Kolkata' });
+
+    expect(getTimezoneAbbr(summer, 'Asia/Kolkata')).toBe('IST');
+    expect(getTimezoneAbbr(winter, 'Asia/Kolkata')).toBe('IST');
+  });
+
+  it('integrates canonical zone abbreviations into utcToLocal and buildSlotInfo', () => {
+    const londonSummerInstant = DateTime.fromISO('2026-07-15T10:00:00.000Z');
+    const dublinSummerInstant = DateTime.fromISO('2026-07-15T10:00:00.000Z');
+    const londonWinterInstant = DateTime.fromISO('2026-01-15T10:00:00.000Z');
+    const dublinWinterInstant = DateTime.fromISO('2026-01-15T10:00:00.000Z');
+
+    const londonSummerInfo = buildSlotInfo(londonSummerInstant, 30, 'Europe/London');
+    expect(londonSummerInfo.tzAbbr).toBe('BST');
+    expect(londonSummerInfo.localStart).toContain('BST');
+
+    const dublinSummerInfo = buildSlotInfo(dublinSummerInstant, 30, 'Europe/Dublin');
+    expect(dublinSummerInfo.tzAbbr).toBe('IST (Ireland)');
+    expect(dublinSummerInfo.localStart).toContain('IST (Ireland)');
+
+    const londonWinterInfo = buildSlotInfo(londonWinterInstant, 30, 'Europe/London');
+    expect(londonWinterInfo.tzAbbr).toBe('GMT');
+    expect(londonWinterInfo.localStart).toContain('GMT');
+
+    const dublinWinterInfo = buildSlotInfo(dublinWinterInstant, 30, 'Europe/Dublin');
+    expect(dublinWinterInfo.tzAbbr).toBe('GMT');
+    expect(dublinWinterInfo.localStart).toContain('GMT');
+  });
+});
+
+describe('SystemClock FAKE_CLOCK_OFFSET_DAYS & NODE_ENV security', () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    SystemClock.resetWarningState();
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    SystemClock.resetWarningState();
+  });
+
+  it('IGNORES FAKE_CLOCK_OFFSET_DAYS when NODE_ENV is production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.FAKE_CLOCK_OFFSET_DAYS = '20';
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const clock = new SystemClock();
+    const now = clock.now();
+    const realUtc = DateTime.utc();
+
+    // Must be within 2 seconds of real UTC (not +20 days)
+    const diffDays = Math.abs(now.diff(realUtc, 'days').days);
+    expect(diffDays).toBeLessThan(0.01);
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('HONORS FAKE_CLOCK_OFFSET_DAYS and logs warning when NODE_ENV is test', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.FAKE_CLOCK_OFFSET_DAYS = '10';
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const clock = new SystemClock();
+    const now = clock.now();
+    const realUtc = DateTime.utc();
+
+    const diffDays = now.diff(realUtc, 'days').days;
+    expect(diffDays).toBeGreaterThan(9.9);
+    expect(diffDays).toBeLessThan(10.1);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('FAKE_CLOCK_OFFSET_DAYS active (+10 days)');
+
+    warnSpy.mockRestore();
+  });
+
+  it('HONORS FAKE_CLOCK_OFFSET_DAYS and logs warning when NODE_ENV is development', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.FAKE_CLOCK_OFFSET_DAYS = '5';
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const clock = new SystemClock();
+    const now = clock.now();
+    const realUtc = DateTime.utc();
+
+    const diffDays = now.diff(realUtc, 'days').days;
+    expect(diffDays).toBeGreaterThan(4.9);
+    expect(diffDays).toBeLessThan(5.1);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('FAKE_CLOCK_OFFSET_DAYS active (+5 days)');
+
+    warnSpy.mockRestore();
+  });
+});
+
