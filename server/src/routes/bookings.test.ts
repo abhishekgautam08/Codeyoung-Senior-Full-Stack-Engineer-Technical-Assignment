@@ -115,6 +115,18 @@ describe('GET /api/timezones/suggested', () => {
     expect(res.body.timezones.length).toBeGreaterThan(0);
     expect(res.body.timezones[0]).toHaveProperty('value');
     expect(res.body.timezones[0]).toHaveProperty('label');
+    expect(res.body.suggestedTimezones).toBeInstanceOf(Array);
+  });
+});
+
+describe('GET /api/mentors', () => {
+  it('returns all active mentors with working windows and profile info', async () => {
+    const res = await request.get('/api/mentors');
+    expect(res.status).toBe(200);
+    expect(res.body.mentors).toBeInstanceOf(Array);
+    expect(res.body.mentors.length).toBe(testMentors.length);
+    expect(res.body.mentors[0]).toHaveProperty('name');
+    expect(res.body.mentors[0]).toHaveProperty('workingWindows');
   });
 });
 

@@ -18,10 +18,10 @@ export const SystemStats: React.FC = () => {
     async function fetchStats() {
       try {
         const [mList, hStatus] = await Promise.all([
-          api.getMentors(),
-          api.getHealth(),
+          api.getMentors().catch(() => []),
+          api.getHealth().catch(() => ({ status: 'connecting', timestamp: new Date().toISOString() })),
         ]);
-        setMentors(mList);
+        setMentors(Array.isArray(mList) ? mList : []);
         setHealth(hStatus);
       } catch (err) {
         console.error('Failed to load stats:', err);

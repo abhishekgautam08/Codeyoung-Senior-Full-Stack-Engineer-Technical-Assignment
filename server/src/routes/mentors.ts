@@ -6,6 +6,23 @@ import { utcToLocal } from '../domain/index.js';
 export const mentorsRouter = Router();
 
 /**
+ * GET /api/mentors
+ * Returns all active mentors with profile details and working windows.
+ */
+mentorsRouter.get('/', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const mentors = await Mentor.find({ isActive: true })
+      .select('name email timezone workingWindows avatarUrl bio isActive')
+      .sort({ name: 1 })
+      .lean();
+
+    res.json({ mentors });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/mentors/:id/schedule?date=YYYY-MM-DD
  */
 mentorsRouter.get(

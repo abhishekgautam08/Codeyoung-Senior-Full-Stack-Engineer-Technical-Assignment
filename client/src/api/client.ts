@@ -93,9 +93,13 @@ export const api = {
   },
 
   async getMentors(): Promise<Mentor[]> {
-    const res = await fetch(`${API_BASE}/mentors`);
-    const data = await handleResponse<{ mentors: Mentor[] }>(res);
-    return data.mentors;
+    try {
+      const res = await fetch(`${API_BASE}/mentors`);
+      const data = await handleResponse<{ mentors?: Mentor[] }>(res);
+      return Array.isArray(data.mentors) ? data.mentors : [];
+    } catch {
+      return [];
+    }
   },
 
   async getMentorSchedule(mentorId: string, date?: string): Promise<MentorScheduleResponse> {
